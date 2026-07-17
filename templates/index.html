@@ -464,6 +464,112 @@
       main { padding: 14px 10px 40px; }
       .price-val { font-size: 1.1rem; }
     }
+
+    /* ── 상세보기 버튼 ── */
+    .detail-btn {
+      font-size: .65rem; font-weight: 600;
+      padding: 3px 9px; border-radius: 5px;
+      background: transparent;
+      border: 1px solid var(--border2);
+      color: var(--muted); cursor: pointer;
+      transition: all .15s; white-space: nowrap;
+    }
+    .detail-btn:hover {
+      background: rgba(59,130,246,.1);
+      border-color: rgba(59,130,246,.3);
+      color: var(--link);
+    }
+
+    /* ── 종목 상세 드로어 ── */
+    #detail-modal {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; justify-content: flex-end;
+    }
+    #detail-overlay {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,.55);
+    }
+    #detail-panel {
+      position: relative; z-index: 201;
+      width: min(480px, 100vw);
+      height: 100%;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    #detail-hd {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 13px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card-h);
+      flex-shrink: 0;
+    }
+    #detail-hd-name { font-size: .95rem; font-weight: 700; }
+    #detail-close {
+      width: 28px; height: 28px;
+      background: transparent;
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      color: var(--muted); cursor: pointer;
+      font-size: 1rem;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    #detail-close:hover {
+      background: rgba(239,68,68,.15);
+      border-color: rgba(239,68,68,.4);
+      color: #ef4444;
+    }
+    #detail-body { flex: 1; overflow-y: auto; }
+    .det-sec { padding: 16px 18px 4px; }
+    .det-sec + .det-sec { padding-top: 14px; }
+    .det-sec-hd {
+      font-size: .73rem; font-weight: 700;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .det-sec-hd::after { content:""; flex:1; height:1px; background:var(--border); }
+
+    /* 공시 아이템 */
+    .det-disc-item {
+      padding: 9px 0;
+      border-bottom: 1px solid rgba(30,47,77,.7);
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .det-disc-item:last-child { border-bottom: none; }
+    .det-badge {
+      display: inline-block;
+      font-size: .6rem; font-weight: 700;
+      padding: 2px 7px; border-radius: 3px;
+      border: 1px solid; white-space: nowrap;
+    }
+    .badge-stake { background: rgba(168,85,247,.1); border-color: rgba(168,85,247,.3); color: #a855f7; }
+    .badge-div   { background: rgba(34,197,94,.1);  border-color: rgba(34,197,94,.3);  color: var(--green); }
+    .badge-rumor { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.3); color: var(--amber); }
+    .badge-earn  { background: rgba(59,130,246,.1); border-color: rgba(59,130,246,.3); color: var(--blue); }
+
+    /* 리포트 아이템 */
+    .det-rep-item {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(30,47,77,.7);
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .det-rep-item:last-child { border-bottom: none; }
+    .det-rep-meta {
+      font-size: .67rem; color: var(--muted);
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .det-rep-firm   { color: var(--text); font-weight: 600; }
+    .det-rep-target { color: var(--amber); }
+
+    /* 공통 */
+    .det-link { color: var(--link); text-decoration: none; font-size: .8rem; line-height: 1.45; }
+    .det-link:hover { color: var(--link-h); text-decoration: underline; }
+    .det-date   { font-size: .65rem; color: var(--muted); }
+    .det-empty  { padding: 18px 0; font-size: .78rem; color: var(--muted); text-align: center; }
+    .det-spin-wrap { display: flex; justify-content: center; padding: 20px 0; }
   </style>
 </head>
 <body>
@@ -544,6 +650,28 @@
     </div>
   </div>
 </main>
+
+<!-- 종목 상세 드로어 -->
+<div id="detail-modal" style="display:none">
+  <div id="detail-overlay" onclick="closeDetail()"></div>
+  <div id="detail-panel">
+    <div id="detail-hd">
+      <span id="detail-hd-name"></span>
+      <button id="detail-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div id="detail-body">
+      <div class="det-sec">
+        <div class="det-sec-hd">최근 공시</div>
+        <div id="det-disclosures"><div class="det-spin-wrap"><div class="big-spin"></div></div></div>
+      </div>
+      <div class="det-sec">
+        <div class="det-sec-hd">증권사 리포트</div>
+        <div id="det-reports"><div class="det-spin-wrap"><div class="big-spin"></div></div></div>
+      </div>
+      <div style="height:32px"></div>
+    </div>
+  </div>
+</div>
 
 <script>
   const NEWS_TTL       = {{ news_ttl }}  * 1000;
@@ -767,8 +895,9 @@
             </li>`).join("")
         : `<li class="no-news">관련 뉴스 없음</li>`;
 
-      const ticker = s.ticker || s.symbol || s.code || "";
-      const safeName = s.name.replace(/'/g, "\\'");
+      const ticker     = s.ticker || s.symbol || s.code || "";
+      const safeName   = s.name.replace(/'/g, "\\'");
+      const safeMarket = showSym ? "US" : "KR";
 
       return `
         <div class="card">
@@ -777,6 +906,7 @@
               <span class="stock-name">${s.name}</span>
               <div style="display:flex;align-items:center;gap:6px">
                 ${badge}
+                <button class="detail-btn" onclick="openDetail('${ticker}','${safeName}','${safeMarket}')">상세보기</button>
                 <button class="del-btn" onclick="removeStock('${ticker}','${safeName}')" title="삭제">×</button>
               </div>
             </div>
@@ -992,6 +1122,91 @@
       if (e.key === "Enter") addStock();
     })
   );
+
+  /* ── 종목 상세 드로어 ── */
+  const _BADGE_CLS = {
+    "지분공시": "badge-stake",
+    "배당":     "badge-div",
+    "풍문":     "badge-rumor",
+    "실적":     "badge-earn",
+  };
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function safeHref(url) {
+    return /^https?:\/\//.test(url) ? url : "#";
+  }
+
+  function fmtDartDate(dt) {
+    if (!dt || dt.length !== 8) return dt || "";
+    return `${dt.slice(0,4)}.${dt.slice(4,6)}.${dt.slice(6,8)}`;
+  }
+
+  async function openDetail(ticker, name, market) {
+    const spin = '<div class="det-spin-wrap"><div class="big-spin"></div></div>';
+    document.getElementById("detail-hd-name").textContent = name;
+    document.getElementById("det-disclosures").innerHTML  = spin;
+    document.getElementById("det-reports").innerHTML      = spin;
+    document.getElementById("detail-modal").style.display = "flex";
+    document.body.style.overflow = "hidden";
+    try {
+      const r = await fetch(`/api/detail/${encodeURIComponent(ticker)}`);
+      if (!r.ok) throw new Error();
+      renderDetail(await r.json(), market);
+    } catch {
+      document.getElementById("det-disclosures").innerHTML =
+        '<div class="det-empty">불러오지 못했습니다.</div>';
+      document.getElementById("det-reports").innerHTML =
+        '<div class="det-empty">불러오지 못했습니다.</div>';
+    }
+  }
+
+  function closeDetail() {
+    document.getElementById("detail-modal").style.display = "none";
+    document.body.style.overflow = "";
+  }
+
+  function renderDetail(data, market) {
+    const discEl = document.getElementById("det-disclosures");
+    const repEl  = document.getElementById("det-reports");
+
+    if (market !== "KR") {
+      discEl.innerHTML = '<div class="det-empty">국내 종목에서만 지원됩니다.</div>';
+      repEl.innerHTML  = '<div class="det-empty">국내 종목에서만 지원됩니다.</div>';
+      return;
+    }
+
+    // 공시
+    const discs = data.disclosures || [];
+    discEl.innerHTML = discs.length
+      ? discs.map(d => `
+          <div class="det-disc-item">
+            <div><span class="det-badge ${_BADGE_CLS[d.badge] || ""}">${esc(d.badge)}</span></div>
+            <a class="det-link" href="${safeHref(d.link)}" target="_blank" rel="noopener">${esc(d.title)}</a>
+            <span class="det-date">${fmtDartDate(d.date)}</span>
+          </div>`).join("")
+      : '<div class="det-empty">최근 180일 내 해당 공시 없음</div>';
+
+    // 리포트
+    const reps = data.reports || [];
+    repEl.innerHTML = reps.length
+      ? reps.map(r => `
+          <div class="det-rep-item">
+            <a class="det-link" href="${safeHref(r.link)}" target="_blank" rel="noopener">${esc(r.title)}</a>
+            <div class="det-rep-meta">
+              <span class="det-rep-firm">${esc(r.firm)}</span>
+              ${r.target ? `<span class="det-rep-target">목표 ${esc(r.target)}원</span>` : ""}
+              <span>${esc(r.date)}</span>
+            </div>
+          </div>`).join("")
+      : '<div class="det-empty">최근 리포트 없음</div>';
+  }
+
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(); });
 
   loadAll();
 </script>

@@ -1,10 +1,14 @@
+import io
 import os
 import re
 import json
 import time
+import datetime
+import zipfile
 import requests
 import feedparser
 import yfinance as yf
+import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
@@ -31,15 +35,21 @@ NAVER_SECRET   = os.getenv("NAVER_CLIENT_SECRET")
 KIS_APP_KEY    = os.getenv("KIS_APP_KEY")
 KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
 KIS_BASE       = "https://openapi.koreainvestment.com:9443"  # 실전투자
+DART_KEY       = os.getenv("DART_API_KEY", "")
 
 # ── 캐시 설정 ─────────────────────────────────────────────────────
 NEWS_TTL  = 600   # 10분
 PRICE_TTL = 60    # 1분
 MIN_FORCE = 60    # 수동 새로고침 최소 간격
 
-_news_cache  = {"data": None, "fetched_at": 0}
-_price_cache = {"data": None, "fetched_at": 0}
-_token_cache = {"value": None, "expires_at": 0}
+_news_cache      = {"data": None, "fetched_at": 0}
+_price_cache     = {"data": None, "fetched_at": 0}
+_token_cache     = {"value": None, "expires_at": 0}
+_dart_corp_cache  = {}   # stock_code(6자리) → corp_code(8자리)
+_dart_code_map    = {}   # corpCode.xml 전체 매핑
+_dart_code_loaded = False
+_detail_cache     = {}   # ticker → {data, fetched_at}
+DETAIL_TTL        = 3600
 
 
 # ── 언론사 도메인 → 이름 매핑 ────────────────────────────────────
@@ -413,6 +423,151 @@ def get_market_news(force=False):
 @app.route("/api/market-news")
 def api_market_news():
     return jsonify(get_market_news(force=request.args.get("force") == "1"))
+
+
+# ── DART 공시 ────────────────────────────────────────────────────
+def _load_dart_code_map():
+    """corpCode.xml ZIP 다운로드 → stock_code(6자리) : corp_code(8자리) 매핑 구축 (1회 실행)"""
+    global _dart_code_loaded, _dart_code_map
+    if _dart_code_loaded:
+        return
+    resp = requests.get(
+        "https://opendart.fss.or.kr/api/corpCode.xml",
+        params={"crtfc_key": DART_KEY},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+        with z.open("CORPCODE.xml") as f:
+            tree = ET.parse(f)
+    for item in tree.getroot().findall("list"):
+        sc = (item.findtext("stock_code") or "").strip()
+        cc = (item.findtext("corp_code")  or "").strip()
+        if sc and cc:
+            _dart_code_map[sc] = cc
+    _dart_code_loaded = True
+
+def _get_dart_corp_code(stock_code):
+    if stock_code in _dart_corp_cache:
+        return _dart_corp_cache[stock_code]
+    _load_dart_code_map()
+    corp_code = _dart_code_map.get(stock_code)
+    if not corp_code:
+        raise ValueError(f"DART corp_code not found for {stock_code}")
+    _dart_corp_cache[stock_code] = corp_code
+    return corp_code
+
+def _dart_badge(report_nm):
+    nm = report_nm
+    if any(k in nm for k in ["지분", "대량보유", "임원", "주요주주"]):
+        return "지분공시"
+    if any(k in nm for k in ["배당", "현금배당", "주식배당"]):
+        return "배당"
+    if any(k in nm for k in ["조회공시", "풍문", "보도내용"]):
+        return "풍문"
+    if any(k in nm for k in ["사업보고서", "분기보고서", "반기보고서", "영업실적", "잠정실적"]):
+        return "실적"
+    return None
+
+def _fetch_dart_disclosures(corp_code, days=180):
+    bgn = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y%m%d")
+    resp = requests.get(
+        "https://opendart.fss.or.kr/api/list.json",
+        params={
+            "crtfc_key": DART_KEY,
+            "corp_code":  corp_code,
+            "bgn_de":     bgn,
+            "sort":       "date",
+            "sort_mth":   "desc",
+            "page_count": "40",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    d = resp.json()
+    if d.get("status") not in ("000", "013"):   # 013 = 조회 결과 없음
+        raise ValueError(d.get("message", "DART error"))
+    results = []
+    for item in d.get("list", []):
+        badge = _dart_badge(item.get("report_nm", ""))
+        if not badge:
+            continue
+        rcept_no = item.get("rcept_no", "")
+        results.append({
+            "badge": badge,
+            "title": item.get("report_nm", ""),
+            "date":  item.get("rcept_dt", ""),
+            "link":  f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}",
+        })
+    return results
+
+
+# ── 네이버 금융 증권사 리포트 ────────────────────────────────────
+def _fetch_naver_reports(stock_code, n=10):
+    # 실제 HTML 구조: <td><a href="company_read.naver?nid=...">제목</a></td><td>증권사</td>
+    #                 <td class="file">...</td><td class="date" ...>YY.MM.DD</td>
+    url = (
+        "https://finance.naver.com/research/company_list.naver"
+        f"?searchType=itemCode&itemCode={stock_code}&page=1"
+    )
+    resp = requests.get(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Referer":    "https://finance.naver.com/",
+        },
+        timeout=8,
+    )
+    resp.encoding = "euc-kr"
+    html = resp.text
+    rows = re.findall(
+        r'<td><a href="(company_read\.naver\?nid=\d+[^"]*?)"[^>]*>(.*?)</a></td>\s*'
+        r'<td>(.*?)</td>\s*'
+        r'<td class="file">.*?</td>\s*'
+        r'<td class="date"[^>]*>(\d{2}\.\d{2}\.\d{2})</td>',
+        html, re.DOTALL,
+    )
+    results = []
+    for path, title, firm, date in rows[:n]:
+        title = re.sub(r"<[^>]+>", "", title).strip()
+        firm  = re.sub(r"<[^>]+>", "", firm).strip()
+        if not title:
+            continue
+        results.append({
+            "title": title,
+            "firm":  firm,
+            "date":  "20" + date,   # YY.MM.DD → 20YY.MM.DD
+            "link":  f"https://finance.naver.com/research/{path}",
+        })
+    return results
+
+
+@app.route("/api/detail/<ticker>")
+def api_detail(ticker):
+    market = "KR" if re.fullmatch(r"\d{6}", ticker) else "US"
+
+    now    = time.time()
+    cached = _detail_cache.get(ticker)
+    if cached and now - cached["fetched_at"] < DETAIL_TTL:
+        return jsonify(cached["data"])
+
+    disclosures, reports = [], []
+
+    if market == "KR":
+        if DART_KEY:
+            try:
+                corp_code   = _get_dart_corp_code(ticker)
+                disclosures = _fetch_dart_disclosures(corp_code)
+            except Exception:
+                pass
+        try:
+            reports = _fetch_naver_reports(ticker)
+        except Exception:
+            pass
+
+    data = {"disclosures": disclosures, "reports": reports, "market": market}
+    _detail_cache[ticker] = {"data": data, "fetched_at": now}
+    return jsonify(data)
 
 
 # ── 관심종목 편집 ─────────────────────────────────────────────────

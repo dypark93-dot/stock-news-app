@@ -1,0 +1,72 @@
+[
+  {
+    "name": "삼성전자",
+    "ticker": "005930",
+    "market": "KR"
+  },
+  {
+    "name": "삼성SDI",
+    "ticker": "006400",
+    "market": "KR"
+  },
+  {
+    "name": "LG에너지솔루션",
+    "ticker": "373220",
+    "market": "KR"
+  },
+  {
+    "name": "비츠로셀",
+    "ticker": "051360",
+    "market": "KR"
+  },
+  {
+    "name": "HPSP",
+    "ticker": "403870",
+    "market": "KR"
+  },
+  {
+    "name": "리노공업",
+    "ticker": "058470",
+    "market": "KR"
+  },
+  {
+    "name": "Microsoft",
+    "ticker": "MSFT",
+    "market": "US"
+  },
+  {
+    "name": "Broadcom",
+    "ticker": "AVGO",
+    "market": "US"
+  },
+  {
+    "name": "Google",
+    "ticker": "GOOGL",
+    "market": "US"
+  },
+  {
+    "name": "Applied Materials",
+    "ticker": "AMAT",
+    "market": "US"
+  },
+  {
+    "name": "TSMC",
+    "ticker": "TSM",
+    "market": "US"
+  },
+  {
+    "name": "Amazon",
+    "ticker": "AMZN",
+    "market": "US"
+  },
+  {
+    "name": "현대차",
+    "ticker": "005380",
+    "market": "KR"
+  },
+  {
+    "name": "Dell Technologies Inc.",
+    "ticker": "DELL",
+    "market": "US"
+  }
+]

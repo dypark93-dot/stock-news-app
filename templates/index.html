@@ -465,25 +465,18 @@
       .price-val { font-size: 1.1rem; }
     }
 
-    /* ── 뉴스 탭 ── */
-    .news-tab-bar {
-      display: flex;
+    /* ── 한글 뉴스 구분선 ── */
+    .kr-news-hd {
+      padding: 5px 14px;
+      font-size: .63rem; font-weight: 700;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+      border-top: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
-      background: rgba(0,0,0,.08);
+      background: rgba(59,130,246,.04);
+      display: flex; align-items: center; gap: 6px;
     }
-    .ntab {
-      flex: 1;
-      padding: 6px 0;
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      color: var(--muted);
-      font-size: .71rem; font-weight: 600;
-      cursor: pointer; transition: all .15s;
-    }
-    .ntab:hover { color: var(--text); }
-    .ntab.ntab-active { color: var(--blue); border-bottom-color: var(--blue); }
+    .kr-news-hd::before { content:""; flex:1; height:1px; background:var(--border2); }
+    .kr-news-hd::after  { content:""; flex:1; height:1px; background:var(--border2); }
 
     /* ── 상세보기 버튼 ── */
     .detail-btn {
@@ -912,20 +905,6 @@
     }).join("");
   }
 
-  /* ── 뉴스 탭 전환 ── */
-  function switchNewsTab(tid, tab) {
-    const krEl = document.getElementById(`ntab-kr-${tid}`);
-    const enEl = document.getElementById(`ntab-en-${tid}`);
-    if (!krEl || !enEl) return;
-    krEl.style.display = tab === "kr" ? "" : "none";
-    enEl.style.display = tab === "en" ? "" : "none";
-    const btns = krEl.previousElementSibling?.querySelectorAll(".ntab");
-    if (btns) {
-      btns[0]?.classList.toggle("ntab-active", tab === "kr");
-      btns[1]?.classList.toggle("ntab-active", tab === "en");
-    }
-  }
-
   /* ── 카드 그리드 렌더 ── */
   function renderGrid(id, stocks, showSym) {
     document.getElementById(id).innerHTML = stocks.map(s => {
@@ -940,13 +919,11 @@
 
       let newsSection;
       if (showSym && s.kr_news !== undefined) {
-        newsSection = `
-          <div class="news-tab-bar">
-            <button class="ntab ntab-active" onclick="switchNewsTab('${tid}','kr')">한글 뉴스</button>
-            <button class="ntab"             onclick="switchNewsTab('${tid}','en')">영문 뉴스</button>
-          </div>
-          <ul class="news-list" id="ntab-kr-${tid}">${_niHtml(s.kr_news, "관련 한글 뉴스 없음")}</ul>
-          <ul class="news-list" id="ntab-en-${tid}" style="display:none">${_niHtml(s.news, "관련 뉴스 없음")}</ul>`;
+        const krBlock = s.kr_news.length
+          ? `<div class="kr-news-hd">한글 뉴스</div>
+             <ul class="news-list">${_niHtml(s.kr_news, "관련 한글 뉴스 없음")}</ul>`
+          : "";
+        newsSection = `<ul class="news-list">${_niHtml(s.news, "관련 뉴스 없음")}</ul>${krBlock}`;
       } else {
         newsSection = `<ul class="news-list">${_niHtml(s.news, "관련 뉴스 없음")}</ul>`;
       }

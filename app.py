@@ -9,7 +9,7 @@ import requests
 import feedparser
 import yfinance as yf
 import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
 
@@ -37,8 +37,8 @@ KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
 KIS_BASE       = "https://openapi.koreainvestment.com:9443"  # 실전투자
 DART_KEY       = os.getenv("DART_API_KEY", "")
 
-# 해외 종목 한글 검색 키워드 (Naver 뉴스용)
-_US_KR_KEYWORDS = {
+# 해외 종목 한글 검색 키워드
+_US_KR_KEYWORDS = {          # Naver 뉴스 검색용
     "MSFT": "마이크로소프트",
     "AVGO": "브로드컴",
     "GOOGL": "구글",
@@ -46,6 +46,14 @@ _US_KR_KEYWORDS = {
     "TSM":  "TSMC",
     "AMZN": "아마존",
     "DELL": "델테크놀로지스",
+}
+_GOOGLE_KR_KEYWORDS = {      # Google News 한국어 RSS용
+    "MSFT": "마이크로소프트",
+    "AVGO": "브로드컴",
+    "GOOGL": "구글 주식",
+    "AMAT": "어플라이드머티리얼즈",
+    "TSM":  "TSMC",
+    "AMZN": "아마존 주식",
 }
 
 # ── 캐시 설정 ─────────────────────────────────────────────────────
@@ -136,6 +144,29 @@ def yahoo_news(symbol, n=5):
         {"title": e.get("title", ""), "link": e.get("link", ""), "pubDate": e.get("published", "")}
         for e in feed.entries[:n]
     ]
+
+
+# ── Google News 한국어 RSS ────────────────────────────────────────
+def google_news_kr(keyword, n=5):
+    url = (
+        "https://news.google.com/rss/search"
+        f"?q={quote(keyword)}&hl=ko&gl=KR&ceid=KR:ko"
+    )
+    feed = feedparser.parse(url, agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    results = []
+    for e in feed.entries[:n]:
+        raw = e.get("title", "").strip()
+        title, source = raw, ""
+        if " - " in raw:
+            title, source = raw.rsplit(" - ", 1)
+            title, source = title.strip(), source.strip()
+        results.append({
+            "title":   title,
+            "link":    e.get("link", ""),
+            "pubDate": e.get("published", ""),
+            "source":  source,
+        })
+    return results
 
 
 # ── KIS: 액세스 토큰 ──────────────────────────────────────────────
@@ -238,14 +269,31 @@ def build_news():
         try:    news = yahoo_news(sym)
         except: news = []
 
-        kr_news = []
-        kw = _US_KR_KEYWORDS.get(sym)
-        if kw:
+        kr_pool = []
+
+        # 1. Naver 뉴스 API
+        kw_nv = _US_KR_KEYWORDS.get(sym)
+        if kw_nv:
             try:
                 time.sleep(0.15)
-                kr_news = naver_news(kw, n=5)
+                kr_pool.extend(naver_news(kw_nv, n=5))
             except Exception:
                 pass
+
+        # 2. Google News 한국어 RSS
+        kw_gn = _GOOGLE_KR_KEYWORDS.get(sym)
+        if kw_gn:
+            try:
+                kr_pool.extend(google_news_kr(kw_gn, n=5))
+            except Exception:
+                pass
+
+        # 제목 앞 15자 기준 중복 제거
+        seen, kr_news = [], []
+        for item in kr_pool:
+            if not _is_dup(item["title"], seen):
+                seen.append(item["title"])
+                kr_news.append(item)
 
         us.append({"name": name, "symbol": sym, "ticker": sym, "news": news, "kr_news": kr_news})
 

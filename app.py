@@ -37,6 +37,17 @@ KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
 KIS_BASE       = "https://openapi.koreainvestment.com:9443"  # 실전투자
 DART_KEY       = os.getenv("DART_API_KEY", "")
 
+# 해외 종목 한글 검색 키워드 (Naver 뉴스용)
+_US_KR_KEYWORDS = {
+    "MSFT": "마이크로소프트",
+    "AVGO": "브로드컴",
+    "GOOGL": "구글",
+    "AMAT": "어플라이드머티리얼즈",
+    "TSM":  "TSMC",
+    "AMZN": "아마존",
+    "DELL": "델테크놀로지스",
+}
+
 # ── 캐시 설정 ─────────────────────────────────────────────────────
 NEWS_TTL  = 600   # 10분
 PRICE_TTL = 60    # 1분
@@ -226,7 +237,17 @@ def build_news():
     for name, sym in US_STOCKS:
         try:    news = yahoo_news(sym)
         except: news = []
-        us.append({"name": name, "symbol": sym, "ticker": sym, "news": news})
+
+        kr_news = []
+        kw = _US_KR_KEYWORDS.get(sym)
+        if kw:
+            try:
+                time.sleep(0.15)
+                kr_news = naver_news(kw, n=5)
+            except Exception:
+                pass
+
+        us.append({"name": name, "symbol": sym, "ticker": sym, "news": news, "kr_news": kr_news})
 
     return {"kr": kr, "us": us, "fetched_at": int(time.time())}
 

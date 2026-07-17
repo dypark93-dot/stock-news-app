@@ -465,6 +465,26 @@
       .price-val { font-size: 1.1rem; }
     }
 
+    /* ── 뉴스 탭 ── */
+    .news-tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,.08);
+    }
+    .ntab {
+      flex: 1;
+      padding: 6px 0;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      color: var(--muted);
+      font-size: .71rem; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .ntab:hover { color: var(--text); }
+    .ntab.ntab-active { color: var(--blue); border-bottom-color: var(--blue); }
+
     /* ── 상세보기 버튼 ── */
     .detail-btn {
       font-size: .65rem; font-weight: 600;
@@ -880,6 +900,32 @@
       </div>`).join("");
   }
 
+  /* ── 뉴스 아이템 HTML 빌더 ── */
+  function _niHtml(news, noMsg) {
+    if (!news || !news.length) return `<li class="no-news">${noMsg}</li>`;
+    return news.map(n => {
+      const meta = [n.source, n.pubDate ? fmtDate(n.pubDate) : ""].filter(Boolean).join(" · ");
+      return `<li class="ni">
+        <a href="${n.link}" target="_blank" rel="noopener">${n.title}</a>
+        ${meta ? `<span class="ni-date">${meta}</span>` : ""}
+      </li>`;
+    }).join("");
+  }
+
+  /* ── 뉴스 탭 전환 ── */
+  function switchNewsTab(tid, tab) {
+    const krEl = document.getElementById(`ntab-kr-${tid}`);
+    const enEl = document.getElementById(`ntab-en-${tid}`);
+    if (!krEl || !enEl) return;
+    krEl.style.display = tab === "kr" ? "" : "none";
+    enEl.style.display = tab === "en" ? "" : "none";
+    const btns = krEl.previousElementSibling?.querySelectorAll(".ntab");
+    if (btns) {
+      btns[0]?.classList.toggle("ntab-active", tab === "kr");
+      btns[1]?.classList.toggle("ntab-active", tab === "en");
+    }
+  }
+
   /* ── 카드 그리드 렌더 ── */
   function renderGrid(id, stocks, showSym) {
     document.getElementById(id).innerHTML = stocks.map(s => {
@@ -887,17 +933,23 @@
         ? `<span class="code-tag">${s.symbol}</span>`
         : s.code ? `<span class="code-tag">${s.code}</span>` : "";
 
-      const newsHtml = s.news.length
-        ? s.news.map(n => `
-            <li class="ni">
-              <a href="${n.link}" target="_blank" rel="noopener">${n.title}</a>
-              ${n.pubDate ? `<span class="ni-date">${fmtDate(n.pubDate)}</span>` : ""}
-            </li>`).join("")
-        : `<li class="no-news">관련 뉴스 없음</li>`;
-
       const ticker     = s.ticker || s.symbol || s.code || "";
       const safeName   = s.name.replace(/'/g, "\\'");
       const safeMarket = showSym ? "US" : "KR";
+      const tid        = ticker.replace(/[^A-Z0-9]/g, "");
+
+      let newsSection;
+      if (showSym && s.kr_news !== undefined) {
+        newsSection = `
+          <div class="news-tab-bar">
+            <button class="ntab ntab-active" onclick="switchNewsTab('${tid}','kr')">한글 뉴스</button>
+            <button class="ntab"             onclick="switchNewsTab('${tid}','en')">영문 뉴스</button>
+          </div>
+          <ul class="news-list" id="ntab-kr-${tid}">${_niHtml(s.kr_news, "관련 한글 뉴스 없음")}</ul>
+          <ul class="news-list" id="ntab-en-${tid}" style="display:none">${_niHtml(s.news, "관련 뉴스 없음")}</ul>`;
+      } else {
+        newsSection = `<ul class="news-list">${_niHtml(s.news, "관련 뉴스 없음")}</ul>`;
+      }
 
       return `
         <div class="card">
@@ -914,7 +966,7 @@
               <span class="price-loading">시세 조회 중…</span>
             </div>
           </div>
-          <ul class="news-list">${newsHtml}</ul>
+          ${newsSection}
         </div>`;
     }).join("");
   }

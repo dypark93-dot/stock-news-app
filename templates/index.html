@@ -556,6 +556,68 @@
       .inv-table th, .inv-table td { padding: 6px 6px; font-size: .72rem; }
     }
 
+    /* ── 수급 동향 ── */
+    .flow-box { border-top: 3px solid #7c3aed; }
+    .flow-hd  { background: rgba(124,58,237,.04); }
+    .flow-hd:hover { background: rgba(124,58,237,.08); }
+    .flow-nav {
+      display: flex; overflow-x: auto; flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,.1);
+    }
+    .flow-nav::-webkit-scrollbar { height: 0; }
+    .flow-tab {
+      padding: 9px 16px; font-size: .78rem; font-weight: 600;
+      cursor: pointer; border: none; background: none;
+      color: var(--muted); border-bottom: 2px solid transparent;
+      white-space: nowrap; flex-shrink: 0; transition: color .15s;
+    }
+    .flow-tab:hover { color: var(--text); }
+    .flow-tab.active { color: #a78bfa; border-bottom-color: #7c3aed; }
+    .flow-toggle-row {
+      display: flex; gap: 8px; padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .flow-toggle-btn {
+      font-size: .72rem; font-weight: 700; padding: 4px 14px;
+      border-radius: 20px; border: 1px solid var(--border);
+      background: none; color: var(--muted); cursor: pointer;
+      transition: all .15s;
+    }
+    .flow-toggle-btn.ab { background: rgba(239,68,68,.12);  border-color: var(--up);   color: var(--up); }
+    .flow-toggle-btn.as { background: rgba(59,130,246,.12); border-color: var(--down); color: var(--down); }
+    .flow-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+    .flow-table th {
+      padding: 7px 10px; font-size: .67rem; font-weight: 700;
+      color: var(--muted); letter-spacing: .04em;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,.1);
+    }
+    .flow-table th:first-child  { text-align: center; width: 32px; }
+    .flow-table th:nth-child(2) { text-align: left; }
+    .flow-table th:nth-child(3),
+    .flow-table th:nth-child(4),
+    .flow-table th:nth-child(5) { text-align: right; }
+    .flow-table td {
+      padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .flow-table tr:last-child td { border-bottom: none; }
+    .flow-table tr:hover td { background: rgba(255,255,255,.02); }
+    .flow-table td:first-child  { text-align: center; color: var(--muted); font-size: .7rem; }
+    .flow-table td:nth-child(3),
+    .flow-table td:nth-child(4),
+    .flow-table td:nth-child(5) { text-align: right; white-space: nowrap; }
+    .flow-table td a { color: var(--text); text-decoration: none; font-weight: 600; }
+    .flow-table td a:hover { text-decoration: underline; }
+    .flow-amt-buy  { color: var(--up);   font-weight: 700; }
+    .flow-amt-sell { color: var(--down); font-weight: 700; }
+    .flow-star { color: var(--amber); margin-right: 2px; font-size: .75rem; }
+    .flow-wl td:nth-child(2) { background: rgba(245,158,11,.05); }
+    @media (max-width:600px) {
+      .flow-table td:nth-child(5) { display: none; }
+      .flow-table th:nth-child(5) { display: none; }
+    }
+
     /* ── 네이버 금융 퀵링크 ── */
     .naver-links {
       display: flex; gap: 4px; flex-wrap: wrap;
@@ -777,6 +839,20 @@
         <span class="kis-arrow" id="high52-arrow">▶</span>
       </div>
       <div class="kis-body" id="high52-body">
+        <div class="kis-empty">새로고침 버튼을 눌러 조회하세요.</div>
+      </div>
+    </div>
+
+    <!-- 수급 동향 -->
+    <div class="kis-box flow-box">
+      <div class="kis-hd flow-hd" id="flow-hd" onclick="toggleKisBox('flow')">
+        <span class="kis-title">🔀 수급 동향</span>
+        <span class="kis-time" id="flow-time"></span>
+        <button class="kis-refresh-btn" id="flow-refresh-btn"
+                onclick="event.stopPropagation();refreshFlow()">새로고침</button>
+        <span class="kis-arrow" id="flow-arrow">▶</span>
+      </div>
+      <div class="kis-body" id="flow-body">
         <div class="kis-empty">새로고침 버튼을 눌러 조회하세요.</div>
       </div>
     </div>
@@ -1032,6 +1108,136 @@
     body.innerHTML = `<table class="inv-table">
       <thead><tr>
         <th>종목</th><th>개인</th><th>기관</th><th>외국인</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  /* ── 수급 동향 ── */
+  let _flowData     = null;
+  let _flowInvestor = "frgn";
+  let _flowDir      = "buy";
+
+  const _FLOW_LABELS = {
+    frgn: "외국인", orgn: "기관전체", pension: "연기금",
+    trust: "투신",  prvt: "사모펀드",
+  };
+
+  function _getWatchlistCodes() {
+    return new Set(
+      [...document.querySelectorAll("#kr-grid .code-tag")]
+        .map(el => el.textContent.trim())
+    );
+  }
+
+  async function refreshFlow() {
+    const btn  = document.getElementById("flow-refresh-btn");
+    const body = document.getElementById("flow-body");
+    btn.disabled = true; btn.textContent = "조회 중…";
+    body.innerHTML = '<div class="kis-empty">데이터를 불러오는 중…<br><small style="opacity:.6">20개 API 호출 중 (약 5~10초)</small></div>';
+    const hd = document.getElementById("flow-hd");
+    if (!hd.classList.contains("open")) { hd.classList.add("open"); body.style.display = "block"; }
+    try {
+      const r = await fetch("/api/flow?force=1");
+      const d = r.ok ? await r.json() : {investors:{}, error:"서버 오류"};
+      renderFlow(d);
+    } catch {
+      body.innerHTML = '<div class="kis-err">조회 실패 — 네트워크를 확인하세요.</div>';
+    } finally {
+      btn.disabled = false; btn.textContent = "새로고침";
+    }
+  }
+
+  function renderFlow(d) {
+    _flowData = d;
+    _flowInvestor = "frgn";
+    _flowDir      = "buy";
+
+    const timeEl = document.getElementById("flow-time");
+    timeEl.textContent = _kisTime() + " 기준";
+
+    const body = document.getElementById("flow-body");
+    if (d.error && !d.investors?.frgn) {
+      body.innerHTML = `<div class="kis-err">${esc(d.error)}</div>`;
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="flow-nav" id="flow-nav">
+        ${Object.entries(_FLOW_LABELS).map(([k,v]) =>
+          `<button class="flow-tab${k==="frgn"?" active":""}"
+                   data-inv="${k}" onclick="switchFlowTab('${k}')">${v}</button>`
+        ).join("")}
+      </div>
+      <div class="flow-toggle-row">
+        <button class="flow-toggle-btn ab" data-dir="buy"
+                onclick="switchFlowDir('buy')">▲ 순매수 TOP10</button>
+        <button class="flow-toggle-btn" data-dir="sell"
+                onclick="switchFlowDir('sell')">▼ 순매도 TOP10</button>
+      </div>
+      <div id="flow-content"></div>`;
+
+    _renderFlowContent();
+  }
+
+  function switchFlowTab(inv) {
+    _flowInvestor = inv;
+    document.querySelectorAll(".flow-tab").forEach(t =>
+      t.classList.toggle("active", t.dataset.inv === inv));
+    _renderFlowContent();
+  }
+
+  function switchFlowDir(dir) {
+    _flowDir = dir;
+    document.querySelectorAll(".flow-toggle-btn").forEach(b => {
+      b.classList.remove("ab", "as");
+      if (b.dataset.dir === dir) b.classList.add(dir === "buy" ? "ab" : "as");
+    });
+    _renderFlowContent();
+  }
+
+  function _renderFlowContent() {
+    if (!_flowData) return;
+    const content = document.getElementById("flow-content");
+    if (!content) return;
+
+    const inv    = (_flowData.investors || {})[_flowInvestor];
+    const items  = inv ? (inv[_flowDir] || []) : [];
+    const isBuy  = _flowDir === "buy";
+    const wlCodes = _getWatchlistCodes();
+
+    if (!items.length) {
+      content.innerHTML = `<div class="kis-empty">데이터 없음</div>`;
+      return;
+    }
+
+    const rows = items.map((s, i) => {
+      const up    = ["1","2"].includes(s.sign);
+      const dn    = ["4","5"].includes(s.sign);
+      const cls   = up ? "up" : dn ? "down" : "flat";
+      const arrow = up ? "▲" : dn ? "▼" : "─";
+      const rateN = parseFloat(s.rate || 0);
+      const rate  = (rateN >= 0 ? "+" : "") + rateN.toFixed(2) + "%";
+      const price = parseInt(s.price || 0).toLocaleString("ko-KR") + "원";
+      const eok   = Math.round((s.amt || 0) / 100);
+      const amtStr = eok.toLocaleString("ko-KR") + "억";
+      const isWl  = wlCodes.has(s.code);
+      const star  = isWl ? '<span class="flow-star">★</span>' : "";
+      return `<tr class="${isWl ? "flow-wl" : ""}">
+        <td>${i + 1}</td>
+        <td>${star}<a href="https://finance.naver.com/item/main.naver?code=${s.code}"
+               target="_blank" rel="noopener">${esc(s.name)}</a></td>
+        <td class="${isBuy ? "flow-amt-buy" : "flow-amt-sell"}">${amtStr}</td>
+        <td><span class="${cls}">${arrow} ${rate}</span></td>
+        <td>${price}</td>
+      </tr>`;
+    }).join("");
+
+    content.innerHTML = `<table class="flow-table">
+      <thead><tr>
+        <th>#</th><th>종목</th>
+        <th>${isBuy ? "순매수금액" : "순매도금액"}</th>
+        <th>등락률</th><th>현재가</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;

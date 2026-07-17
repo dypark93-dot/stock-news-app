@@ -818,6 +818,144 @@ def api_investor_trend():
         return jsonify({"stocks": [], "error": str(e)}), 200
 
 
+# ── 수급 동향 (투자자별 순매수/순매도 상위) ──────────────────────
+_FLOW_INVESTOR_CODES = {
+    "frgn":    "1",   # 외국인
+    "orgn":    "2",   # 기관전체
+    "pension": "9",   # 연기금
+    "trust":   "3",   # 투신
+    "prvt":    "4",   # 사모펀드
+}
+_flow_cache = {"data": None, "fetched_at": 0}
+
+
+def _fetch_flow_raw(inv_code, sort_code, mrkt):
+    """
+    sort_code: "0" = 순매수 상위, "1" = 순매도 상위
+    mrkt     : "J" = KOSPI, "K" = KOSDAQ
+    """
+    token = get_token()
+    resp = requests.get(
+        f"{KIS_BASE}/uapi/domestic-stock/v1/ranking/investor",
+        headers={
+            "authorization": f"Bearer {token}",
+            "appkey":        KIS_APP_KEY,
+            "appsecret":     KIS_APP_SECRET,
+            "tr_id":         "FHPST01060000",
+            "custtype":      "P",
+        },
+        params={
+            "fid_cond_mrkt_div_code":  mrkt,
+            "fid_cond_scr_div_code":   "20059",
+            "fid_input_iscd":          "0000",
+            "fid_trgt_cls_code":       inv_code,
+            "fid_trgt_exls_cls_code":  "0",
+            "fid_rank_sort_cls_code":  sort_code,
+            "fid_input_cnt_1":         "0",
+            "fid_vol_cnt":             "",
+            "fid_aply_rang_prc_1":     "",
+            "fid_aply_rang_prc_2":     "",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json().get("output", [])
+
+
+def _flow_merge_top(pool, n=10):
+    """KOSPI+KOSDAQ 합산 중복 제거 → 순매수금액 절댓값 기준 재정렬 → 상위 n개"""
+    seen, items = set(), []
+    for s in pool:
+        code = (s.get("stck_shrn_iscd") or "").strip()
+        if code and code not in seen:
+            seen.add(code)
+            items.append(s)
+    try:
+        items.sort(
+            key=lambda x: abs(int(float(x.get("ntby_tr_pbmn", "0") or "0"))),
+            reverse=True,
+        )
+    except Exception:
+        pass
+    return items[:n]
+
+
+def _normalize_flow(raw_list):
+    items = []
+    for s in raw_list:
+        code = (s.get("stck_shrn_iscd") or "").strip()
+        if not code:
+            continue
+        try:
+            amt = abs(int(float(s.get("ntby_tr_pbmn", "0") or "0")))
+        except (ValueError, TypeError):
+            amt = 0
+        items.append({
+            "code":  code,
+            "name":  (s.get("hts_kor_isnm") or "").strip(),
+            "price": s.get("stck_prpr", "0"),
+            "rate":  s.get("prdy_ctrt", "0.00"),
+            "sign":  s.get("prdy_vrss_sign", "3"),
+            "amt":   amt,   # 백만원, 절댓값
+        })
+    return items
+
+
+def build_flow_data():
+    # 5개 투자자 × 2방향 × 2시장 = 20 API 호출 → ThreadPoolExecutor로 병렬화
+    tasks = [
+        (inv_key, inv_code, sort_code, mrkt)
+        for inv_key, inv_code in _FLOW_INVESTOR_CODES.items()
+        for sort_code in ("0", "1")
+        for mrkt in ("J", "K")
+    ]
+
+    def _fetch_one(args):
+        inv_key, inv_code, sort_code, mrkt = args
+        time.sleep(0.05)   # 연속 호출 최소 간격
+        try:
+            raw = _fetch_flow_raw(inv_code, sort_code, mrkt)
+        except Exception:
+            raw = []
+        return inv_key, sort_code, raw
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fetched = list(ex.map(_fetch_one, tasks))
+
+    # 투자자별, 방향별로 집계
+    agg = {k: {"0": [], "1": []} for k in _FLOW_INVESTOR_CODES}
+    for inv_key, sort_code, raw in fetched:
+        agg[inv_key][sort_code].extend(raw)
+
+    investors = {}
+    for inv_key in _FLOW_INVESTOR_CODES:
+        investors[inv_key] = {
+            "buy":  _normalize_flow(_flow_merge_top(agg[inv_key]["0"])),
+            "sell": _normalize_flow(_flow_merge_top(agg[inv_key]["1"])),
+        }
+
+    return {"investors": investors, "fetched_at": int(time.time())}
+
+
+def get_flow_data(force=False):
+    now = time.time()
+    ttl = _high52_ttl()
+    if force or _flow_cache["data"] is None or now - _flow_cache["fetched_at"] >= ttl:
+        _flow_cache["data"]       = build_flow_data()
+        _flow_cache["fetched_at"] = now
+    return _flow_cache["data"]
+
+
+@app.route("/api/flow")
+def api_flow():
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
+        return jsonify({"investors": {}, "error": "KIS API 키 미설정"}), 200
+    try:
+        return jsonify(get_flow_data(force=request.args.get("force") == "1"))
+    except Exception as e:
+        return jsonify({"investors": {}, "error": str(e)}), 200
+
+
 # ── 관심종목 편집 ─────────────────────────────────────────────────
 def save_watchlist(items):
     with open(_WATCHLIST_PATH, "w", encoding="utf-8") as f:

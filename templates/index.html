@@ -465,6 +465,28 @@
       .price-val { font-size: 1.1rem; }
     }
 
+    /* ── 네이버 금융 퀵링크 ── */
+    .naver-links {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      padding: 8px 12px;
+      border-top: 1px solid var(--border);
+      background: rgba(0,0,0,.06);
+    }
+    .nv-btn {
+      font-size: .62rem; font-weight: 700;
+      padding: 3px 9px; border-radius: 4px;
+      background: rgba(3,199,90,.08);
+      border: 1px solid rgba(3,199,90,.22);
+      color: #03c75a;
+      text-decoration: none; white-space: nowrap;
+      transition: all .15s;
+    }
+    .nv-btn:hover {
+      background: rgba(3,199,90,.18);
+      border-color: rgba(3,199,90,.45);
+      color: #05e96a;
+    }
+
     /* ── 한글 뉴스 구분선 ── */
     .kr-news-hd {
       padding: 5px 14px;
@@ -928,6 +950,15 @@
         newsSection = `<ul class="news-list">${_niHtml(s.news, "관련 뉴스 없음")}</ul>`;
       }
 
+      const naverLinks = (!showSym && s.code) ? `
+        <div class="naver-links">
+          <a class="nv-btn" href="https://finance.naver.com/item/main.naver?code=${s.code}" target="_blank" rel="noopener">종목분석</a>
+          <a class="nv-btn" href="https://finance.naver.com/item/fchart.naver?code=${s.code}" target="_blank" rel="noopener">차트</a>
+          <a class="nv-btn" href="https://finance.naver.com/item/news.naver?code=${s.code}" target="_blank" rel="noopener">공시·뉴스</a>
+          <a class="nv-btn" href="https://finance.naver.com/item/coinfo.naver?code=${s.code}" target="_blank" rel="noopener">재무제표</a>
+          <a class="nv-btn" href="https://finance.naver.com/item/analyst.naver?code=${s.code}" target="_blank" rel="noopener">투자의견</a>
+        </div>` : "";
+
       return `
         <div class="card">
           <div class="card-hd">
@@ -944,6 +975,7 @@
             </div>
           </div>
           ${newsSection}
+          ${naverLinks}
         </div>`;
     }).join("");
   }

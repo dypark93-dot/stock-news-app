@@ -9,6 +9,7 @@ import requests
 import feedparser
 import yfinance as yf
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, quote
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
@@ -637,6 +638,184 @@ def api_detail(ticker):
     data = {"disclosures": disclosures, "reports": reports, "market": market}
     _detail_cache[ticker] = {"data": data, "fetched_at": now}
     return jsonify(data)
+
+
+# ── 52주 신고가 ───────────────────────────────────────────────────
+_high52_cache = {"data": None, "fetched_at": 0}
+
+def _high52_ttl():
+    """장 마감(16:00 KST) 이후 or 주말이면 자정까지, 장중엔 10분"""
+    KST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(KST)
+    if now.weekday() >= 5:  # 주말
+        midnight = (now + datetime.timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        return max(int((midnight - now).total_seconds()), 7200)
+    close_t = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if now >= close_t:  # 장 마감 후
+        midnight = (now + datetime.timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        return max(int((midnight - now).total_seconds()), 3600)
+    open_t = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    if now < open_t:    # 장 시작 전
+        return int((open_t - now).total_seconds())
+    return 600          # 장중 10분
+
+
+def _fetch_52w_raw(mrkt):
+    token = get_token()
+    resp = requests.get(
+        f"{KIS_BASE}/uapi/domestic-stock/v1/ranking/high-low",
+        headers={
+            "authorization": f"Bearer {token}",
+            "appkey":        KIS_APP_KEY,
+            "appsecret":     KIS_APP_SECRET,
+            "tr_id":         "FHPST01700000",
+            "custtype":      "P",
+        },
+        params={
+            "fid_cond_mrkt_div_code": mrkt,   # J=KOSPI, K=KOSDAQ
+            "fid_cond_scr_div_code":  "20170",
+            "fid_input_iscd":         "0000",
+            "fid_rank_sort_cls_code": "0",
+            "fid_high_low_gb":        "1",     # 1=신고가
+            "fid_vol_cnt":            "",
+            "fid_aply_rang_prc_1":    "",
+            "fid_aply_rang_prc_2":    "",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json().get("output", [])
+
+
+def build_high52():
+    # KOSPI + KOSDAQ 합산 → 중복 제거 → 상위 30개
+    pool = []
+    for mrkt in ("J", "K"):
+        try:
+            pool.extend(_fetch_52w_raw(mrkt))
+        except Exception:
+            pass
+
+    seen, stocks = set(), []
+    for s in pool:
+        code = (s.get("stck_shrn_iscd") or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        stocks.append({
+            "code":      code,
+            "name":      (s.get("hts_kor_isnm") or "").strip(),
+            "price":     s.get("stck_prpr", "0"),
+            "rate":      s.get("prdy_ctrt", "0.00"),
+            "sign":      s.get("prdy_vrss_sign", "3"),
+            "high_date": s.get("d250_hgst_date", ""),
+        })
+        if len(stocks) >= 30:
+            break
+
+    def _add_news(s):
+        try:
+            s["news"] = naver_news(s["name"], n=2)
+        except Exception:
+            s["news"] = []
+        return s
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        stocks = list(ex.map(_add_news, stocks))
+
+    return {"stocks": stocks, "fetched_at": int(time.time())}
+
+
+def get_high52(force=False):
+    now = time.time()
+    ttl = _high52_ttl()
+    if force or _high52_cache["data"] is None or now - _high52_cache["fetched_at"] >= ttl:
+        _high52_cache["data"]       = build_high52()
+        _high52_cache["fetched_at"] = now
+    return _high52_cache["data"]
+
+
+@app.route("/api/high52")
+def api_high52():
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
+        return jsonify({"stocks": [], "error": "KIS API 키 미설정"}), 200
+    try:
+        return jsonify(get_high52(force=request.args.get("force") == "1"))
+    except Exception as e:
+        return jsonify({"stocks": [], "error": str(e)}), 200
+
+
+# ── 투자자별 매매동향 ──────────────────────────────────────────────
+_investor_cache = {"data": None, "fetched_at": 0}
+
+def _fetch_investor_stock(code):
+    """당일 투자자별 매매동향 (FHKST01010900) - 단일 종목"""
+    token = get_token()
+    today = datetime.date.today().strftime("%Y%m%d")
+    resp = requests.get(
+        f"{KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor",
+        headers={
+            "authorization": f"Bearer {token}",
+            "appkey":        KIS_APP_KEY,
+            "appsecret":     KIS_APP_SECRET,
+            "tr_id":         "FHKST01010900",
+        },
+        params={
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD":         code,
+            "FID_BEG_DATE":           today,
+            "FID_END_DATE":           today,
+        },
+        timeout=8,
+    )
+    resp.raise_for_status()
+    rows = resp.json().get("output", [])
+    if not rows:
+        return None
+    r = rows[0]
+    def _i(key):
+        return int(r.get(key, 0) or 0)
+    return {
+        "prsn_qty": _i("prsn_ntby_qty"),
+        "frgn_qty": _i("frgn_ntby_qty"),
+        "orgn_qty": _i("orgn_ntby_qty"),
+        "prsn_amt": _i("prsn_ntby_tr_pbmn"),   # 백만원
+        "frgn_amt": _i("frgn_ntby_tr_pbmn"),
+        "orgn_amt": _i("orgn_ntby_tr_pbmn"),
+    }
+
+
+def build_investor_trend():
+    stocks_data = []
+    for name, code in KR_STOCKS:
+        try:
+            inv = _fetch_investor_stock(code)
+        except Exception:
+            inv = None
+        stocks_data.append({"code": code, "name": name, "investor": inv})
+        time.sleep(0.1)   # 연속 호출 간격
+    return {"stocks": stocks_data, "fetched_at": int(time.time())}
+
+
+def get_investor_trend(force=False):
+    now = time.time()
+    ttl = _high52_ttl()   # 동일한 TTL 로직 공유
+    if force or _investor_cache["data"] is None or now - _investor_cache["fetched_at"] >= ttl:
+        _investor_cache["data"]       = build_investor_trend()
+        _investor_cache["fetched_at"] = now
+    return _investor_cache["data"]
+
+
+@app.route("/api/investor-trend")
+def api_investor_trend():
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
+        return jsonify({"stocks": [], "error": "KIS API 키 미설정"}), 200
+    try:
+        return jsonify(get_investor_trend(force=request.args.get("force") == "1"))
+    except Exception as e:
+        return jsonify({"stocks": [], "error": str(e)}), 200
 
 
 # ── 관심종목 편집 ─────────────────────────────────────────────────

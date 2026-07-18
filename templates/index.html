@@ -216,6 +216,72 @@
       color: var(--muted); font-size: .78rem;
     }
 
+    /* ── 글로벌 시장 ── */
+    .gm-box {
+      border: 1px solid var(--border);
+      border-top: 3px solid #0ea5e9;
+      border-radius: 10px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .gm-hd {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px;
+      background: rgba(14,165,233,.04);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+    }
+    .gm-hd:hover { background: rgba(14,165,233,.08); }
+    .gm-hd-title { font-size: .85rem; font-weight: 700; flex: 1; }
+    .gm-hd-time  { font-size: .67rem; color: var(--muted); white-space: nowrap; }
+    .gm-refresh-btn {
+      font-size: .72rem; padding: 2px 8px;
+      border: 1px solid #0ea5e9; border-radius: 4px;
+      color: #0ea5e9; background: transparent; cursor: pointer;
+      white-space: nowrap;
+    }
+    .gm-refresh-btn:hover { background: rgba(14,165,233,.12); }
+    .gm-body {
+      display: flex; flex-wrap: wrap; gap: 0;
+    }
+    .gm-panel {
+      flex: 1; min-width: 220px;
+      border-right: 1px solid var(--border);
+    }
+    .gm-panel:last-child { border-right: none; }
+    .gm-panel-title {
+      font-size: .65rem; font-weight: 700; letter-spacing: .08em;
+      color: #0ea5e9; text-transform: uppercase;
+      padding: 5px 12px;
+      background: rgba(14,165,233,.06);
+      border-bottom: 1px solid var(--border);
+    }
+    .gm-group-label {
+      font-size: .63rem; font-weight: 600;
+      color: var(--muted); letter-spacing: .05em;
+      padding: 5px 12px 2px;
+    }
+    .gm-row {
+      display: flex; align-items: center;
+      padding: 4px 12px;
+      border-bottom: 1px solid rgba(128,128,128,.07);
+      font-size: .78rem;
+    }
+    .gm-row:last-child { border-bottom: none; }
+    .gm-name  { flex: 1; color: var(--fg); font-size: .75rem; }
+    .gm-price { font-weight: 600; text-align: right; white-space: nowrap; min-width: 72px; }
+    .gm-chg   { font-size: .7rem; text-align: right; white-space: nowrap; min-width: 62px; }
+    .gm-rate  { font-size: .7rem; font-weight: 700; text-align: right; white-space: nowrap; min-width: 52px; }
+    .gm-up    { color: var(--up); }
+    .gm-dn    { color: var(--down); }
+    .gm-flat  { color: var(--muted); }
+    .gm-spin  { text-align: center; padding: 28px 0; color: var(--muted); font-size: .8rem; }
+    .gm-err   { text-align: center; padding: 18px 0; color: var(--muted); font-size: .8rem; }
+    @media(max-width:640px){
+      .gm-panel { min-width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+      .gm-panel:last-child { border-bottom: none; }
+    }
+
     /* ── 시장 이슈 ── */
     .market-box {
       border: 1px solid var(--border);
@@ -801,6 +867,19 @@
 
   <div id="loading"><div class="big-spin"></div><p>데이터를 불러오는 중입니다…</p></div>
   <div id="content" style="display:none">
+    <!-- 글로벌 시장 -->
+    <div class="gm-box">
+      <div class="gm-hd" onclick="toggleGmBox()">
+        <span class="gm-hd-title">🌐 글로벌 시장</span>
+        <span class="gm-hd-time" id="gm-time"></span>
+        <button class="gm-refresh-btn" onclick="event.stopPropagation();refreshGlobalMarket()">↺ 새로고침</button>
+        <span class="kis-arrow" id="gm-arrow">▲</span>
+      </div>
+      <div id="gm-body" class="gm-body">
+        <div class="gm-spin" id="gm-spin">⏳ 글로벌 시장 데이터를 불러오는 중…</div>
+      </div>
+    </div>
+
     <!-- 시장 이슈 -->
     <div class="market-box">
       <div class="market-box-hd">
@@ -1243,6 +1322,116 @@
     </table>`;
   }
 
+  /* ── 글로벌 시장 ── */
+  let _gmOpen = true;
+
+  function toggleGmBox() {
+    _gmOpen = !_gmOpen;
+    document.getElementById("gm-body").style.display  = _gmOpen ? "flex"  : "none";
+    document.getElementById("gm-arrow").textContent   = _gmOpen ? "▲" : "▼";
+  }
+
+  function _fmtPrice(v) {
+    if (v == null || isNaN(v)) return "─";
+    const dp = Math.abs(v) >= 10 ? 2 : 4;
+    return v.toLocaleString("en-US", {minimumFractionDigits: dp, maximumFractionDigits: dp});
+  }
+
+  function _fmtChg(v) {
+    if (v == null || isNaN(v)) return "─";
+    const dp = Math.abs(v) >= 1 ? 2 : 4;
+    const s  = v > 0 ? "+" : "";
+    return s + v.toLocaleString("en-US", {minimumFractionDigits: dp, maximumFractionDigits: dp});
+  }
+
+  function _gmRowHtml(item) {
+    if (!item.ok) {
+      return `<div class="gm-row">
+        <span class="gm-name">${item.name}</span>
+        <span class="gm-price gm-flat">─</span>
+        <span class="gm-rate gm-flat">─</span>
+      </div>`;
+    }
+    const cls = item.sign === "2" ? "gm-up" : item.sign === "5" ? "gm-dn" : "gm-flat";
+    const arrow = item.sign === "2" ? "▲" : item.sign === "5" ? "▼" : "";
+    return `<div class="gm-row">
+      <span class="gm-name">${item.name}</span>
+      <span class="gm-price ${cls}">${_fmtPrice(item.price)}</span>
+      <span class="gm-chg ${cls}">${_fmtChg(item.change)}</span>
+      <span class="gm-rate ${cls}">${arrow}${Math.abs(item.rate).toFixed(2)}%</span>
+    </div>`;
+  }
+
+  function renderGlobalMarket(d) {
+    const timeEl = document.getElementById("gm-time");
+    if (d.fetched_at) {
+      const t = new Date(d.fetched_at * 1000);
+      timeEl.textContent = t.toLocaleTimeString("ko-KR",
+        {hour:"2-digit", minute:"2-digit"}) + " 기준";
+    }
+
+    /* 주요 지수 패널 */
+    const regionOrder = ["한국", "미국", "아시아", "유럽", "중국"];
+    let idxHtml = "";
+    for (const region of regionOrder) {
+      const items = (d.indices || {})[region] || [];
+      if (!items.length) continue;
+      idxHtml += `<div class="gm-group-label">${region}</div>`;
+      idxHtml += items.map(_gmRowHtml).join("");
+    }
+
+    /* 원자재 패널 */
+    const commHtml = (d.commodities || []).map(_gmRowHtml).join("");
+
+    /* 환율 패널 */
+    const fxHtml = (d.fx || []).map(_gmRowHtml).join("");
+
+    const body = document.getElementById("gm-body");
+    body.innerHTML = `
+      <div class="gm-panel">
+        <div class="gm-panel-title">주요 지수</div>
+        ${idxHtml || '<div class="gm-err">데이터 없음</div>'}
+      </div>
+      <div class="gm-panel">
+        <div class="gm-panel-title">원자재</div>
+        ${commHtml || '<div class="gm-err">데이터 없음</div>'}
+      </div>
+      <div class="gm-panel">
+        <div class="gm-panel-title">환율</div>
+        ${fxHtml || '<div class="gm-err">데이터 없음</div>'}
+      </div>`;
+    body.style.display = _gmOpen ? "flex" : "none";
+  }
+
+  async function loadGlobalMarket() {
+    try {
+      const r = await fetch("/api/global-market");
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      renderGlobalMarket(d);
+    } catch (e) {
+      document.getElementById("gm-body").innerHTML =
+        `<div class="gm-err" style="padding:20px;width:100%">글로벌 시장 데이터를 불러오지 못했습니다: ${e.message}</div>`;
+    }
+  }
+
+  async function refreshGlobalMarket() {
+    const body = document.getElementById("gm-body");
+    body.innerHTML = '<div class="gm-spin" style="width:100%">⏳ 새로고침 중…</div>';
+    body.style.display = "flex";
+    _gmOpen = true;
+    document.getElementById("gm-arrow").textContent = "▲";
+    try {
+      const r = await fetch("/api/global-market?force=1");
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      renderGlobalMarket(d);
+    } catch (e) {
+      body.innerHTML =
+        `<div class="gm-err" style="padding:20px;width:100%">오류: ${e.message}</div>`;
+    }
+  }
+
   /* ── 전체 렌더 ── */
   function renderAll(news, prices, market) {
     renderMarket(market);
@@ -1260,6 +1449,7 @@
     startNewsCountdown(news.fetched_at);
     startPriceCountdown();
     startMarketAutoRefresh();
+    loadGlobalMarket();
   }
 
   /* ── 시장 이슈 렌더 (아코디언) ── */

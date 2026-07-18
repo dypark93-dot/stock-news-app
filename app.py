@@ -2,6 +2,7 @@ import io
 import os
 import re
 import json
+import math
 import time
 import datetime
 import zipfile
@@ -954,6 +955,116 @@ def api_flow():
         return jsonify(get_flow_data(force=request.args.get("force") == "1"))
     except Exception as e:
         return jsonify({"investors": {}, "error": str(e)}), 200
+
+
+# ── 글로벌 시장 (지수·원자재·환율) ───────────────────────────────
+GLOBAL_MARKET_CONFIG = [
+    # (그룹, yfinance 심볼, 표시명)
+    ("지수_한국",   "^KS11",      "KOSPI"),
+    ("지수_한국",   "^KQ11",      "KOSDAQ"),
+    ("지수_미국",   "^DJI",       "다우존스"),
+    ("지수_미국",   "^GSPC",      "S&P 500"),
+    ("지수_미국",   "^IXIC",      "나스닥"),
+    ("지수_아시아", "^N225",      "니케이 225"),
+    ("지수_아시아", "^TWII",      "대만가권"),
+    ("지수_아시아", "^HSI",       "항셍지수"),
+    ("지수_유럽",   "^STOXX50E",  "유로스톡스50"),
+    ("지수_유럽",   "^GDAXI",     "DAX 40"),
+    ("지수_유럽",   "^FCHI",      "CAC 40"),
+    ("지수_중국",   "000001.SS",  "상해종합"),
+    ("지수_중국",   "399001.SZ",  "심천종합"),
+    ("원자재",      "GC=F",       "금 ($/oz)"),
+    ("원자재",      "SI=F",       "은 ($/oz)"),
+    ("원자재",      "CL=F",       "WTI유 ($/bbl)"),
+    ("원자재",      "BZ=F",       "브렌트유 ($/bbl)"),
+    ("원자재",      "HG=F",       "구리 ($/lb)"),
+    ("환율",        "USDKRW=X",   "달러/원"),
+    ("환율",        "USDJPY=X",   "달러/엔"),
+    ("환율",        "EURUSD=X",   "유로/달러"),
+]
+
+GLOBAL_TTL    = 300   # 5분 캐시
+_global_cache = {"data": None, "fetched_at": 0}
+
+
+def _gm_clean(v):
+    """NaN/inf → None so jsonify stays valid."""
+    try:
+        f = float(v)
+        return None if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_gm_single(cfg):
+    group, sym, name = cfg
+    try:
+        h = yf.Ticker(sym).history(period="2d")
+        if len(h) < 1:
+            return group, sym, name, None
+        price = _gm_clean(h["Close"].iloc[-1])
+        prev  = _gm_clean(h["Close"].iloc[-2]) if len(h) >= 2 else price
+        high  = _gm_clean(h["High"].iloc[-1])
+        low   = _gm_clean(h["Low"].iloc[-1])
+        if price is None or prev is None:
+            return group, sym, name, None
+        change = round(price - prev, 6)
+        rate   = round(change / prev * 100, 2) if prev else 0
+        return group, sym, name, {
+            "price":  price,
+            "high":   high,
+            "low":    low,
+            "change": change,
+            "rate":   rate,
+            "sign":   "2" if change > 0 else ("5" if change < 0 else "3"),
+        }
+    except Exception:
+        return group, sym, name, None
+
+
+def build_global_market():
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        raw = list(ex.map(_fetch_gm_single, GLOBAL_MARKET_CONFIG))
+
+    groups = {}
+    for group, sym, name, data in raw:
+        if group not in groups:
+            groups[group] = []
+        groups[group].append({
+            "sym":  sym,
+            "name": name,
+            **(data or {}),
+            "ok":   data is not None,
+        })
+
+    return {
+        "indices": {
+            "한국":   groups.get("지수_한국",   []),
+            "미국":   groups.get("지수_미국",   []),
+            "아시아": groups.get("지수_아시아", []),
+            "유럽":   groups.get("지수_유럽",   []),
+            "중국":   groups.get("지수_중국",   []),
+        },
+        "commodities": groups.get("원자재", []),
+        "fx":          groups.get("환율",   []),
+        "fetched_at":  int(time.time()),
+    }
+
+
+def get_global_market(force=False):
+    now = time.time()
+    if force or _global_cache["data"] is None or now - _global_cache["fetched_at"] >= GLOBAL_TTL:
+        _global_cache["data"]       = build_global_market()
+        _global_cache["fetched_at"] = now
+    return _global_cache["data"]
+
+
+@app.route("/api/global-market")
+def api_global_market():
+    try:
+        return jsonify(get_global_market(force=request.args.get("force") == "1"))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 200
 
 
 # ── 관심종목 편집 ─────────────────────────────────────────────────

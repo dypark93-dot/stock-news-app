@@ -1075,42 +1075,43 @@ def api_gm_chart():
     if not sym:
         return jsonify({"error": "sym 파라미터 필요"}), 400
 
-    _PERIOD_INTERVAL = {"1d": "5m", "5d": "1h", "1mo": "1d"}
-    interval = _PERIOD_INTERVAL.get(period, "1d")
+    # 1d=일봉(6개월), 1wk=주봉(5년), 1mo=월봉(전체)
+    _PERIOD_MAP = {
+        "1d":  ("6mo", "1d"),
+        "1wk": ("5y",  "1wk"),
+        "1mo": ("max", "1mo"),
+    }
+    fetch_period, interval = _PERIOD_MAP.get(period, ("6mo", "1d"))
 
     try:
-        h = yf.Ticker(sym).history(period=period, interval=interval)
-        if len(h) < 2:
-            # 1d 인트라데이 없으면 hourly로 재시도
-            if interval == "5m":
-                h = yf.Ticker(sym).history(period=period, interval="1h")
+        h = yf.Ticker(sym).history(period=fetch_period, interval=interval)
         if len(h) == 0:
             return jsonify({"error": "데이터 없음"})
 
-        dates, closes, highs, lows = [], [], [], []
+        candles = []
         for idx, row in h.iterrows():
             try:
-                dt = idx.to_pydatetime()
-                if period == "1d":
-                    dates.append(dt.strftime("%H:%M"))
-                elif period == "5d":
-                    dates.append(dt.strftime("%m/%d %H:%M"))
-                else:
-                    dates.append(dt.strftime("%m/%d"))
+                date_str = idx.to_pydatetime().strftime("%Y-%m-%d")
             except Exception:
-                dates.append(str(idx)[:16])
-            closes.append(_gm_clean(row["Close"]))
-            highs.append(_gm_clean(row["High"]))
-            lows.append(_gm_clean(row["Low"]))
+                date_str = str(idx)[:10]
 
-        return jsonify({
-            "sym":    sym,
-            "period": period,
-            "dates":  dates,
-            "closes": closes,
-            "highs":  highs,
-            "lows":   lows,
-        })
+            o  = _gm_clean(row["Open"])
+            hh = _gm_clean(row["High"])
+            l  = _gm_clean(row["Low"])
+            c  = _gm_clean(row["Close"])
+            v  = int(row.get("Volume", 0) or 0)
+
+            if all(x is not None for x in [o, hh, l, c]):
+                candles.append({
+                    "time":   date_str,
+                    "open":   o,
+                    "high":   hh,
+                    "low":    l,
+                    "close":  c,
+                    "volume": v,
+                })
+
+        return jsonify({"sym": sym, "period": period, "candles": candles})
     except Exception as e:
         return jsonify({"error": str(e)})
 

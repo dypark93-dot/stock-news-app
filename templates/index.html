@@ -834,7 +834,7 @@
     .gmc-overlay.show { display: flex; }
     .gmc-modal {
       background: var(--card); border: 1px solid var(--border);
-      border-radius: 14px; width: 640px; max-width: 98vw;
+      border-radius: 14px; width: 960px; max-width: 98vw;
       overflow: hidden;
       box-shadow: 0 20px 60px rgba(0,0,0,.4);
     }
@@ -868,15 +868,24 @@
       color: #fff; font-weight: 600;
     }
     .gmc-period-btn:hover:not(.active) { border-color: #0ea5e9; color: #0ea5e9; }
-    .gmc-body { padding: 14px 18px 18px; min-height: 220px; }
+    .gmc-body { padding: 0; min-height: 440px; position: relative; }
     .gmc-spin, .gmc-err {
       display: flex; align-items: center; justify-content: center;
-      min-height: 220px; color: var(--muted); font-size: .82rem;
+      min-height: 440px; color: var(--muted); font-size: .82rem;
+      padding: 20px;
+    }
+    .gmc-tooltip {
+      position: absolute; top: 10px; left: 14px; z-index: 10;
+      font-size: .73rem; line-height: 1.5; pointer-events: none;
+      background: rgba(19,23,34,.88);
+      border: 1px solid #2a2e39; border-radius: 5px;
+      padding: 5px 10px; color: #d1d4dc;
+      display: none;
     }
     .gm-row-clickable { cursor: pointer; }
     .gm-row-clickable:hover { background: rgba(14,165,233,.07); }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -929,9 +938,9 @@
         <button class="gmc-hd-close" onclick="closeGmChart()">✕</button>
       </div>
       <div class="gmc-period-row">
-        <button class="gmc-period-btn" data-p="1d"  onclick="switchGmPeriod('1d')">일간</button>
-        <button class="gmc-period-btn" data-p="5d"  onclick="switchGmPeriod('5d')">주간</button>
-        <button class="gmc-period-btn active" data-p="1mo" onclick="switchGmPeriod('1mo')">월간</button>
+        <button class="gmc-period-btn active" data-p="1d"  onclick="switchGmPeriod('1d')">일봉</button>
+        <button class="gmc-period-btn"        data-p="1wk" onclick="switchGmPeriod('1wk')">주봉</button>
+        <button class="gmc-period-btn"        data-p="1mo" onclick="switchGmPeriod('1mo')">월봉</button>
       </div>
       <div class="gmc-body" id="gmc-body">
         <div class="gmc-spin">차트를 불러오는 중…</div>
@@ -1508,28 +1517,28 @@
     }
   }
 
-  /* ── 글로벌 시장 차트 모달 ── */
-  let _gmcChart  = null;
-  let _gmcSym    = "";
-  let _gmcPeriod = "1mo";
-  let _gmcItem   = null;
+  /* ── 글로벌 시장 캔들스틱 차트 모달 (Lightweight Charts) ── */
+  let _gmcChart    = null;
+  let _gmcResizeOb = null;
+  let _gmcSym      = "";
+  let _gmcPeriod   = "1d";
 
   function openGmChart(name, sym, price, change, rate, sign) {
     if (!sym) return;
     _gmcSym    = sym;
-    _gmcPeriod = "1mo";
-    _gmcItem   = {name, sym, price, change, rate, sign};
+    _gmcPeriod = "1d";
 
     document.getElementById("gmc-name").textContent = name;
     _updateGmcHeader(price, change, rate, sign);
-    _setGmcPeriodTab("1mo");
+    _setGmcPeriodTab("1d");
     document.getElementById("gmc-overlay").classList.add("show");
-    _loadGmcData(sym, "1mo");
+    _loadGmcData(sym, "1d");
   }
 
   function closeGmChart() {
     document.getElementById("gmc-overlay").classList.remove("show");
-    if (_gmcChart) { _gmcChart.destroy(); _gmcChart = null; }
+    if (_gmcResizeOb) { _gmcResizeOb.disconnect(); _gmcResizeOb = null; }
+    if (_gmcChart)    { _gmcChart.remove();         _gmcChart    = null; }
   }
 
   function switchGmPeriod(p) {
@@ -1539,9 +1548,8 @@
   }
 
   function _setGmcPeriodTab(p) {
-    document.querySelectorAll(".gmc-period-btn").forEach(b => {
-      b.classList.toggle("active", b.dataset.p === p);
-    });
+    document.querySelectorAll(".gmc-period-btn").forEach(b =>
+      b.classList.toggle("active", b.dataset.p === p));
   }
 
   function _updateGmcHeader(price, change, rate, sign) {
@@ -1557,8 +1565,9 @@
 
   async function _loadGmcData(sym, period) {
     const body = document.getElementById("gmc-body");
-    body.innerHTML = '<div class="gmc-spin">⏳ 데이터 로딩 중…</div>';
-    if (_gmcChart) { _gmcChart.destroy(); _gmcChart = null; }
+    body.innerHTML = '<div class="gmc-spin">⏳ 차트 데이터 로딩 중…</div>';
+    if (_gmcResizeOb) { _gmcResizeOb.disconnect(); _gmcResizeOb = null; }
+    if (_gmcChart)    { _gmcChart.remove();         _gmcChart    = null; }
     try {
       const r = await fetch(`/api/global-market/chart?sym=${encodeURIComponent(sym)}&period=${period}`);
       const d = await r.json();
@@ -1570,74 +1579,107 @@
   }
 
   function _renderGmcChart(container, d) {
-    const closes = d.closes || [];
-    const valid  = closes.filter(v => v != null);
-    if (!valid.length) {
+    const candles = (d.candles || []);
+    if (!candles.length) {
       container.innerHTML = '<div class="gmc-err">데이터 없음</div>';
       return;
     }
 
-    const first = valid[0];
-    const last  = valid[valid.length - 1];
-    const isUp  = last >= first;
-    const color = isUp ? '#ef4444' : '#3b82f6';
-    const fill  = isUp ? 'rgba(239,68,68,0.12)' : 'rgba(59,130,246,0.12)';
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+                   || document.documentElement.getAttribute('data-theme') === 'dark';
 
-    const isDark   = window.matchMedia('(prefers-color-scheme: dark)').matches
-                     || document.documentElement.getAttribute('data-theme') === 'dark';
-    const textClr  = isDark ? '#94a3b8' : '#64748b';
-    const gridClr  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    /* 컨테이너 준비 */
+    container.innerHTML = '';
+    container.style.height = '440px';
 
-    container.innerHTML = '<canvas id="gmc-canvas" style="max-height:280px"></canvas>';
-    const ctx = document.getElementById("gmc-canvas").getContext("2d");
+    const chartEl = document.createElement('div');
+    chartEl.style.cssText = 'width:100%;height:380px;';
+    container.appendChild(chartEl);
 
-    _gmcChart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: d.dates,
-        datasets: [{
-          data:            closes,
-          borderColor:     color,
-          backgroundColor: fill,
-          borderWidth:     2,
-          pointRadius:     0,
-          pointHoverRadius:4,
-          fill:            true,
-          tension:         0.25,
-          spanGaps:        true,
-        }]
+    /* ── Lightweight Charts 생성 ── */
+    const chart = LightweightCharts.createChart(chartEl, {
+      width:  chartEl.clientWidth || 900,
+      height: 380,
+      layout: {
+        background: { type: 'solid', color: isDark ? '#131722' : '#f8fafc' },
+        textColor:  isDark ? '#c3c8d4' : '#374151',
       },
-      options: {
-        responsive: true,
-        animation: { duration: 350 },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            mode: "index", intersect: false,
-            backgroundColor: isDark ? "#1e293b" : "#fff",
-            borderColor: color, borderWidth: 1,
-            titleColor: textClr, bodyColor: textClr,
-            callbacks: {
-              label: ctx => " " + _fmtPrice(ctx.parsed.y),
-            }
-          }
-        },
-        scales: {
-          x: {
-            ticks: { color: textClr, maxTicksLimit: 7, maxRotation: 0 },
-            grid:  { color: gridClr },
-          },
-          y: {
-            position: "right",
-            ticks: {
-              color: textClr,
-              callback: v => _fmtPrice(v),
-            },
-            grid: { color: gridClr },
-          }
-        }
-      }
+      grid: {
+        vertLines: { color: isDark ? '#1e2538' : '#e5e7eb' },
+        horzLines: { color: isDark ? '#1e2538' : '#e5e7eb' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: isDark ? '#374151' : '#d1d5db' },
+      timeScale: {
+        borderColor:    isDark ? '#374151' : '#d1d5db',
+        timeVisible:    false,
+        secondsVisible: false,
+        fixLeftEdge:    false,
+        fixRightEdge:   false,
+      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
+      handleScale:  { mouseWheel: true, pinch: true },
     });
+
+    /* ── 캔들 시리즈 (한국 색상: 상승=빨강, 하락=파랑) ── */
+    const candleSeries = chart.addCandlestickSeries({
+      upColor:         '#ef4444',
+      downColor:       '#3b82f6',
+      borderUpColor:   '#ef4444',
+      borderDownColor: '#3b82f6',
+      wickUpColor:     '#ef4444',
+      wickDownColor:   '#3b82f6',
+    });
+    candleSeries.setData(candles);
+
+    /* ── 거래량 시리즈 ── */
+    const hasVol = candles.some(c => c.volume > 0);
+    if (hasVol) {
+      const volSeries = chart.addHistogramSeries({
+        priceFormat:  { type: 'volume' },
+        priceScaleId: 'vol',
+      });
+      chart.priceScale('vol').applyOptions({
+        scaleMargins: { top: 0.82, bottom: 0 },
+      });
+      volSeries.setData(candles.map(c => ({
+        time:  c.time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(239,68,68,0.35)' : 'rgba(59,130,246,0.35)',
+      })));
+    }
+
+    chart.timeScale().fitContent();
+
+    /* ── OHLC 호버 툴팁 ── */
+    const tip = document.createElement('div');
+    tip.className = 'gmc-tooltip';
+    container.appendChild(tip);
+
+    chart.subscribeCrosshairMove(param => {
+      if (!param.time || !param.seriesData.size) {
+        tip.style.display = 'none';
+        return;
+      }
+      const c = param.seriesData.get(candleSeries);
+      if (!c) { tip.style.display = 'none'; return; }
+      const clr = c.close >= c.open ? '#ef4444' : '#3b82f6';
+      tip.style.display = 'block';
+      tip.innerHTML =
+        `<span style="color:${clr};font-weight:700">${param.time}</span><br>` +
+        `<span>시가&nbsp;${_fmtPrice(c.open)}</span>&ensp;` +
+        `<span style="color:#ef4444">고가&nbsp;${_fmtPrice(c.high)}</span>&ensp;` +
+        `<span style="color:#3b82f6">저가&nbsp;${_fmtPrice(c.low)}</span>&ensp;` +
+        `<span style="color:${clr}">종가&nbsp;<b>${_fmtPrice(c.close)}</b></span>`;
+    });
+
+    _gmcChart = chart;
+
+    /* ── 반응형 리사이즈 ── */
+    _gmcResizeOb = new ResizeObserver(() => {
+      chart.applyOptions({ width: chartEl.clientWidth });
+    });
+    _gmcResizeOb.observe(chartEl);
   }
 
   /* ── 전체 렌더 ── */

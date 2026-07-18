@@ -1067,6 +1067,54 @@ def api_global_market():
         return jsonify({"error": str(e)}), 200
 
 
+@app.route("/api/global-market/chart")
+def api_gm_chart():
+    sym    = request.args.get("sym", "").strip()
+    period = request.args.get("period", "1mo")
+
+    if not sym:
+        return jsonify({"error": "sym 파라미터 필요"}), 400
+
+    _PERIOD_INTERVAL = {"1d": "5m", "5d": "1h", "1mo": "1d"}
+    interval = _PERIOD_INTERVAL.get(period, "1d")
+
+    try:
+        h = yf.Ticker(sym).history(period=period, interval=interval)
+        if len(h) < 2:
+            # 1d 인트라데이 없으면 hourly로 재시도
+            if interval == "5m":
+                h = yf.Ticker(sym).history(period=period, interval="1h")
+        if len(h) == 0:
+            return jsonify({"error": "데이터 없음"})
+
+        dates, closes, highs, lows = [], [], [], []
+        for idx, row in h.iterrows():
+            try:
+                dt = idx.to_pydatetime()
+                if period == "1d":
+                    dates.append(dt.strftime("%H:%M"))
+                elif period == "5d":
+                    dates.append(dt.strftime("%m/%d %H:%M"))
+                else:
+                    dates.append(dt.strftime("%m/%d"))
+            except Exception:
+                dates.append(str(idx)[:16])
+            closes.append(_gm_clean(row["Close"]))
+            highs.append(_gm_clean(row["High"]))
+            lows.append(_gm_clean(row["Low"]))
+
+        return jsonify({
+            "sym":    sym,
+            "period": period,
+            "dates":  dates,
+            "closes": closes,
+            "highs":  highs,
+            "lows":   lows,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
 # ── 관심종목 편집 ─────────────────────────────────────────────────
 def save_watchlist(items):
     with open(_WATCHLIST_PATH, "w", encoding="utf-8") as f:

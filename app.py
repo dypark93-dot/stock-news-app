@@ -59,7 +59,7 @@ _GOOGLE_KR_KEYWORDS = {      # Google News 한국어 RSS용
 }
 
 # ── 캐시 설정 ─────────────────────────────────────────────────────
-NEWS_TTL  = 600   # 10분
+NEWS_TTL  = 1800  # 30분
 PRICE_TTL = 60    # 1분
 MIN_FORCE = 60    # 수동 새로고침 최소 간격
 
@@ -412,7 +412,7 @@ def get_rss_items():
         ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         for url in RSS_FEEDS:
             try:
-                for e in feedparser.parse(url, agent=ua).entries[:60]:
+                for e in feedparser.parse(url, agent=ua).entries[:200]:
                     t = clean(e.get("title", ""))
                     l = e.get("link", "")
                     if t and l:
@@ -446,13 +446,13 @@ def _build_category(cat_name, keywords, rss_pool):
     seen_titles = []
     items       = []
 
-    # 1. Naver 뉴스 키워드 검색 (키워드당 5개)
+    # 1. Naver 뉴스 키워드 검색 (키워드당 50개)
     naver_pool = []
     for i, kw in enumerate(keywords):
         if i > 0:
             time.sleep(0.15)
         try:
-            for art in naver_news(kw, n=5):
+            for art in naver_news(kw, n=50):
                 naver_pool.append({**art, "keyword": kw})
         except Exception:
             pass
@@ -1075,10 +1075,10 @@ def api_gm_chart():
     if not sym:
         return jsonify({"error": "sym 파라미터 필요"}), 400
 
-    # 1d=일봉(6개월), 1wk=주봉(5년), 1mo=월봉(전체)
+    # 1d=일봉(2년, 200일MA 충분), 1wk=주봉(전체), 1mo=월봉(전체)
     _PERIOD_MAP = {
-        "1d":  ("6mo", "1d"),
-        "1wk": ("5y",  "1wk"),
+        "1d":  ("2y",  "1d"),
+        "1wk": ("max", "1wk"),
         "1mo": ("max", "1mo"),
     }
     fetch_period, interval = _PERIOD_MAP.get(period, ("6mo", "1d"))

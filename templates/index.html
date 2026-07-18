@@ -868,10 +868,10 @@
       color: #fff; font-weight: 600;
     }
     .gmc-period-btn:hover:not(.active) { border-color: #0ea5e9; color: #0ea5e9; }
-    .gmc-body { padding: 0; min-height: 440px; position: relative; }
+    .gmc-body { padding: 0; min-height: 490px; position: relative; }
     .gmc-spin, .gmc-err {
       display: flex; align-items: center; justify-content: center;
-      min-height: 440px; color: var(--muted); font-size: .82rem;
+      min-height: 490px; color: var(--muted); font-size: .82rem;
       padding: 20px;
     }
     .gmc-tooltip {
@@ -882,8 +882,39 @@
       padding: 5px 10px; color: #d1d4dc;
       display: none;
     }
+    .gmc-ma-legend {
+      position: absolute; top: 6px; right: 12px; z-index: 10;
+      font-size: .67rem; line-height: 1; pointer-events: none;
+      display: flex; gap: 7px; flex-wrap: wrap;
+    }
+    .gmc-panel-label {
+      position: absolute; top: 4px; left: 10px; z-index: 10;
+      font-size: .67rem; color: #6b7280; pointer-events: none;
+    }
     .gm-row-clickable { cursor: pointer; }
     .gm-row-clickable:hover { background: rgba(14,165,233,.07); }
+    /* ── 읽은 뉴스 ── */
+    .ni.ni-read > a,
+    .market-ni.mni-read > a,
+    .mf-item.mfi-read > a      { color: #a78bfa; }
+    .ni.ni-read > a:hover,
+    .market-ni.mni-read > a:hover,
+    .mf-item.mfi-read > a:hover { color: #c4b5fd; text-decoration: underline; }
+    /* ── 피드 페이지네이션 ── */
+    .feed-pagination {
+      display: flex; align-items: center; justify-content: center;
+      gap: 3px; padding: 14px 0; flex-wrap: wrap;
+    }
+    .feed-pg-btn {
+      min-width: 30px; height: 30px; padding: 0 7px;
+      border: 1px solid var(--border2); border-radius: 6px;
+      color: var(--muted); background: transparent; cursor: pointer;
+      font-size: .78rem; transition: border-color .15s, color .15s;
+    }
+    .feed-pg-btn:hover { border-color: #0ea5e9; color: #0ea5e9; }
+    .feed-pg-btn.pg-active { background: #0ea5e9; border-color: #0ea5e9; color: #fff; font-weight: 700; }
+    .feed-pg-sep { color: var(--muted); font-size: .78rem; padding: 0 2px; line-height: 30px; }
+    .feed-count { font-size: .7rem; color: var(--muted); text-align: center; padding: 8px 0 2px; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -897,12 +928,6 @@
   </div>
   <div class="h-right">
     <span id="last-updated"></span>
-    <div class="badge">
-      <span class="dot"></span>뉴스 갱신 <b id="news-cd">--:--</b>
-    </div>
-    <div class="badge p-badge">
-      <span class="dot"></span>가격 갱신 <b id="price-cd">--:--</b>
-    </div>
     <button id="refresh-btn" onclick="loadAll(true)">새로고침</button>
   </div>
 </header>
@@ -977,7 +1002,7 @@
           </div>
         </div>
         <div class="market-box-hd-right">
-          <span id="market-time"></span><span id="market-cd" style="margin-left:6px;opacity:.65"></span>
+          <span id="market-time"></span>
         </div>
       </div>
       <div class="market-view-bar">
@@ -1578,8 +1603,70 @@
     }
   }
 
+  /* ── 기술적 지표 계산 ── */
+  function _calcSMA(candles, period) {
+    const r = []; if (candles.length < period) return r;
+    let s = 0;
+    for (let i = 0; i < period; i++) s += candles[i].close;
+    r.push({ time: candles[period-1].time, value: s / period });
+    for (let i = period; i < candles.length; i++) {
+      s += candles[i].close - candles[i-period].close;
+      r.push({ time: candles[i].time, value: s / period });
+    }
+    return r;
+  }
+
+  function _calcEMAArr(vals, period) {
+    if (vals.length < period) return [];
+    const k = 2 / (period + 1);
+    let e = vals.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    const r = [e];
+    for (let i = period; i < vals.length; i++) { e = vals[i]*k + e*(1-k); r.push(e); }
+    return r;
+  }
+
+  function _calcMACD(candles, fast=12, slow=26, sig=9) {
+    const cls = candles.map(c => c.close), n = cls.length;
+    if (n < slow + sig) return null;
+    const fastE = _calcEMAArr(cls, fast), slowE = _calcEMAArr(cls, slow);
+    const off = slow - fast;
+    const macdRaw = slowE.map((sv, i) => fastE[i + off] - sv);
+    const sigRaw  = _calcEMAArr(macdRaw, sig);
+    const start   = slow + sig - 2;
+    const md = [], sd = [], hd = [];
+    for (let i = 0; i < sigRaw.length; i++) {
+      const ci = start + i; if (ci >= n) break;
+      const m = macdRaw[sig - 1 + i], sv = sigRaw[i], h = m - sv;
+      md.push({ time: candles[ci].time, value: m });
+      sd.push({ time: candles[ci].time, value: sv });
+      hd.push({ time: candles[ci].time, value: h,
+        color: h >= 0 ? 'rgba(239,68,68,.65)' : 'rgba(59,130,246,.65)' });
+    }
+    return { md, sd, hd };
+  }
+
+  function _calcRSI(candles, period=14) {
+    const n = candles.length; if (n < period + 1) return [];
+    const r = []; let ag = 0, al = 0;
+    for (let i = 1; i <= period; i++) {
+      const d = candles[i].close - candles[i-1].close;
+      d > 0 ? ag += d : al -= d;
+    }
+    ag /= period; al /= period;
+    const rs0 = al === 0 ? Infinity : ag / al;
+    r.push({ time: candles[period].time, value: 100 - 100 / (1 + rs0) });
+    for (let i = period + 1; i < n; i++) {
+      const d = candles[i].close - candles[i-1].close;
+      ag = (ag * (period-1) + (d > 0 ? d : 0)) / period;
+      al = (al * (period-1) + (d < 0 ? -d : 0)) / period;
+      const rs = al === 0 ? Infinity : ag / al;
+      r.push({ time: candles[i].time, value: 100 - 100 / (1 + rs) });
+    }
+    return r;
+  }
+
   function _renderGmcChart(container, d) {
-    const candles = (d.candles || []);
+    const candles = d.candles || [];
     if (!candles.length) {
       container.innerHTML = '<div class="gmc-err">데이터 없음</div>';
       return;
@@ -1587,99 +1674,159 @@
 
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
                    || document.documentElement.getAttribute('data-theme') === 'dark';
+    const bg  = isDark ? '#131722' : '#f8fafc';
+    const txt = isDark ? '#c3c8d4' : '#374151';
+    const gr  = isDark ? '#1e2538' : '#e5e7eb';
+    const bdr = isDark ? '#374151' : '#d1d5db';
 
-    /* 컨테이너 준비 */
     container.innerHTML = '';
-    container.style.height = '440px';
+    const W = container.clientWidth || 900;
 
-    const chartEl = document.createElement('div');
-    chartEl.style.cssText = 'width:100%;height:380px;';
-    container.appendChild(chartEl);
+    /* 차트 팩토리 */
+    function mkChart(el, h, showTime) {
+      return LightweightCharts.createChart(el, {
+        width: W, height: h,
+        layout: { background: { type:'solid', color:bg }, textColor:txt },
+        grid: { vertLines:{color:gr}, horzLines:{color:gr} },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor:bdr },
+        timeScale: {
+          borderColor:bdr, timeVisible:false, secondsVisible:false,
+          visible: showTime, fixLeftEdge:false, fixRightEdge:false,
+        },
+        handleScroll: { mouseWheel:true, pressedMouseMove:true, horzTouchDrag:true },
+        handleScale:  { mouseWheel:true, pinch:true },
+      });
+    }
 
-    /* ── Lightweight Charts 생성 ── */
-    const chart = LightweightCharts.createChart(chartEl, {
-      width:  chartEl.clientWidth || 900,
-      height: 380,
-      layout: {
-        background: { type: 'solid', color: isDark ? '#131722' : '#f8fafc' },
-        textColor:  isDark ? '#c3c8d4' : '#374151',
-      },
-      grid: {
-        vertLines: { color: isDark ? '#1e2538' : '#e5e7eb' },
-        horzLines: { color: isDark ? '#1e2538' : '#e5e7eb' },
-      },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: isDark ? '#374151' : '#d1d5db' },
-      timeScale: {
-        borderColor:    isDark ? '#374151' : '#d1d5db',
-        timeVisible:    false,
-        secondsVisible: false,
-        fixLeftEdge:    false,
-        fixRightEdge:   false,
-      },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
-      handleScale:  { mouseWheel: true, pinch: true },
+    /* 패널 헬퍼 */
+    function mkPanel(h, label, showBorder) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `width:100%;height:${h}px;position:relative;` +
+        (showBorder ? `border-top:1px solid ${gr};` : '');
+      if (label) {
+        const lb = document.createElement('div');
+        lb.className = 'gmc-panel-label'; lb.textContent = label;
+        wrap.appendChild(lb);
+      }
+      container.appendChild(wrap);
+      return wrap;
+    }
+
+    /* ── 1. 메인 차트 (캔들 + 이동평균) ── */
+    const mainEl    = mkPanel(268, '', false);
+    const mainChart = mkChart(mainEl, 268, false);
+
+    const MA_CFG = [
+      [5,   '#f0b429', 1  ],
+      [10,  '#a855f7', 1  ],
+      [20,  '#22c55e', 1.5],
+      [60,  '#3b82f6', 1.5],
+      [120, '#f97316', 1.5],
+      [200, '#94a3b8', 2  ],
+    ];
+    MA_CFG.forEach(([p, color, w]) => {
+      const data = _calcSMA(candles, p);
+      if (!data.length) return;
+      const s = mainChart.addLineSeries({ color, lineWidth:w,
+        priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+      s.setData(data);
     });
 
-    /* ── 캔들 시리즈 (한국 색상: 상승=빨강, 하락=파랑) ── */
-    const candleSeries = chart.addCandlestickSeries({
-      upColor:         '#ef4444',
-      downColor:       '#3b82f6',
-      borderUpColor:   '#ef4444',
-      borderDownColor: '#3b82f6',
-      wickUpColor:     '#ef4444',
-      wickDownColor:   '#3b82f6',
+    const candleSeries = mainChart.addCandlestickSeries({
+      upColor:'#ef4444', downColor:'#3b82f6',
+      borderUpColor:'#ef4444', borderDownColor:'#3b82f6',
+      wickUpColor:'#ef4444',   wickDownColor:'#3b82f6',
     });
     candleSeries.setData(candles);
 
-    /* ── 거래량 시리즈 ── */
-    const hasVol = candles.some(c => c.volume > 0);
-    if (hasVol) {
-      const volSeries = chart.addHistogramSeries({
-        priceFormat:  { type: 'volume' },
-        priceScaleId: 'vol',
-      });
-      chart.priceScale('vol').applyOptions({
-        scaleMargins: { top: 0.82, bottom: 0 },
-      });
-      volSeries.setData(candles.map(c => ({
-        time:  c.time,
-        value: c.volume,
-        color: c.close >= c.open ? 'rgba(239,68,68,0.35)' : 'rgba(59,130,246,0.35)',
+    if (candles.some(c => c.volume > 0)) {
+      const vs = mainChart.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'vol' });
+      mainChart.priceScale('vol').applyOptions({ scaleMargins:{top:0.82,bottom:0} });
+      vs.setData(candles.map(c => ({
+        time:c.time, value:c.volume,
+        color: c.close >= c.open ? 'rgba(239,68,68,.25)' : 'rgba(59,130,246,.25)',
       })));
     }
+    mainChart.timeScale().fitContent();
 
-    chart.timeScale().fitContent();
-
-    /* ── OHLC 호버 툴팁 ── */
+    /* OHLC 툴팁 */
     const tip = document.createElement('div');
-    tip.className = 'gmc-tooltip';
-    container.appendChild(tip);
-
-    chart.subscribeCrosshairMove(param => {
-      if (!param.time || !param.seriesData.size) {
-        tip.style.display = 'none';
-        return;
-      }
+    tip.className = 'gmc-tooltip'; mainEl.appendChild(tip);
+    mainChart.subscribeCrosshairMove(param => {
+      if (!param.time || !param.seriesData.size) { tip.style.display='none'; return; }
       const c = param.seriesData.get(candleSeries);
-      if (!c) { tip.style.display = 'none'; return; }
+      if (!c) { tip.style.display='none'; return; }
       const clr = c.close >= c.open ? '#ef4444' : '#3b82f6';
       tip.style.display = 'block';
       tip.innerHTML =
         `<span style="color:${clr};font-weight:700">${param.time}</span><br>` +
-        `<span>시가&nbsp;${_fmtPrice(c.open)}</span>&ensp;` +
+        `시가&nbsp;${_fmtPrice(c.open)}&ensp;` +
         `<span style="color:#ef4444">고가&nbsp;${_fmtPrice(c.high)}</span>&ensp;` +
         `<span style="color:#3b82f6">저가&nbsp;${_fmtPrice(c.low)}</span>&ensp;` +
         `<span style="color:${clr}">종가&nbsp;<b>${_fmtPrice(c.close)}</b></span>`;
     });
 
-    _gmcChart = chart;
+    /* MA 범례 */
+    const leg = document.createElement('div'); leg.className = 'gmc-ma-legend';
+    leg.innerHTML = MA_CFG.map(([p, c]) =>
+      `<span style="color:${c}">MA${p}</span>`).join('&nbsp;');
+    mainEl.appendChild(leg);
 
-    /* ── 반응형 리사이즈 ── */
-    _gmcResizeOb = new ResizeObserver(() => {
-      chart.applyOptions({ width: chartEl.clientWidth });
+    /* ── 2. MACD 차트 ── */
+    const macdEl    = mkPanel(112, 'MACD (12, 26, 9)', true);
+    const macdChart = mkChart(macdEl, 112, false);
+
+    const macdRes = _calcMACD(candles);
+    if (macdRes) {
+      const hs = macdChart.addHistogramSeries({ priceLineVisible:false, lastValueVisible:false });
+      hs.setData(macdRes.hd);
+      const ms = macdChart.addLineSeries({ color:'#3b82f6', lineWidth:1.5,
+        priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+      ms.setData(macdRes.md);
+      const ss = macdChart.addLineSeries({ color:'#f97316', lineWidth:1,
+        priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+      ss.setData(macdRes.sd);
+    }
+    macdChart.timeScale().fitContent();
+
+    /* ── 3. RSI 차트 ── */
+    const rsiEl    = mkPanel(110, 'RSI (14)', true);
+    const rsiChart = mkChart(rsiEl, 110, true);
+
+    const rsiData = _calcRSI(candles);
+    if (rsiData.length) {
+      const rs = rsiChart.addLineSeries({ color:'#a855f7', lineWidth:1.5,
+        priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false,
+        autoscaleInfoProvider: () => ({ priceRange:{minValue:0,maxValue:100}, margins:{above:5,below:5} }),
+      });
+      rs.setData(rsiData);
+      const LS = LightweightCharts.LineStyle;
+      rs.createPriceLine({ price:70, color:'#ef4444aa', lineWidth:1, lineStyle:LS.Dashed, axisLabelVisible:true });
+      rs.createPriceLine({ price:30, color:'#3b82f6aa', lineWidth:1, lineStyle:LS.Dashed, axisLabelVisible:true });
+    }
+    rsiChart.timeScale().fitContent();
+
+    /* ── 시간축 동기화 ── */
+    const allCharts = [mainChart, macdChart, rsiChart];
+    let _sync = false;
+    allCharts.forEach(ch => {
+      ch.timeScale().subscribeVisibleLogicalRangeChange(rng => {
+        if (_sync || !rng) return;
+        _sync = true;
+        allCharts.forEach(o => { if (o !== ch) o.timeScale().setVisibleLogicalRange(rng); });
+        _sync = false;
+      });
     });
-    _gmcResizeOb.observe(chartEl);
+
+    _gmcChart = { remove() { allCharts.forEach(c => c.remove()); } };
+
+    /* 반응형 리사이즈 */
+    _gmcResizeOb = new ResizeObserver(() => {
+      const w = container.clientWidth;
+      allCharts.forEach(c => c.applyOptions({ width: w }));
+    });
+    _gmcResizeOb.observe(container);
   }
 
   /* ── 전체 렌더 ── */
@@ -1696,13 +1843,13 @@
     document.getElementById("loading").style.display = "none";
     document.getElementById("content").style.display = "block";
 
-    startNewsCountdown(news.fetched_at);
-    startPriceCountdown();
-    startMarketAutoRefresh();
     loadGlobalMarket();
   }
 
-  /* ── 시장 이슈 렌더 (아코디언) ── */
+  /* ── 카테고리별 보기 (아코디언 + 내부 페이지네이션) ── */
+  const _catPages    = {};   // { catIdx: currentPage }
+  const _CAT_PER_PAGE = 30;
+
   function renderMarket(market) {
     const grid   = document.getElementById("market-grid");
     const timeEl = document.getElementById("market-time");
@@ -1714,7 +1861,7 @@
       return;
     }
 
-    // 재렌더 전에 열려 있던 카테고리 이름 기억
+    // 새로고침 전 열려있던 카테고리 기억
     const wasOpen = new Set();
     if (_marketData) {
       _marketData.categories.forEach((cat, i) => {
@@ -1742,10 +1889,8 @@
       <div class="market-acc-body" id="cat-body-${i}" style="display:none"></div>
     `).join("");
 
-    // 이전에 열려 있던 카테고리 복원
     cats.forEach((cat, i) => { if (wasOpen.has(cat.name)) toggleCat(i); });
 
-    // 피드 뷰가 활성 상태면 즉시 재렌더
     if (_marketView === "feed") {
       renderMarketFeed(market);
       _feedRendered = true;
@@ -1753,30 +1898,75 @@
   }
 
   function toggleCat(i) {
-    const row   = document.getElementById(`cat-row-${i}`);
-    const body  = document.getElementById(`cat-body-${i}`);
+    const row  = document.getElementById(`cat-row-${i}`);
+    const body = document.getElementById(`cat-body-${i}`);
     if (!row || !body) return;
-
     const isOpen = body.style.display !== "none";
     if (isOpen) {
       body.style.display = "none";
       row.classList.remove("open");
     } else {
-      if (!body.dataset.rendered && _marketData) {
-        const cat = _marketData.categories[i];
-        body.innerHTML = cat.items.length
-          ? cat.items.map(item => `
-              <div class="market-ni">
-                <span class="market-ni-kw">${item.keyword}</span>
-                <a href="${item.link}" target="_blank" rel="noopener">${item.title}</a>
-                ${item.pubDate ? `<span class="market-ni-date">${fmtDate(item.pubDate)}</span>` : ""}
-              </div>`).join("")
-          : `<div class="market-ni"><span class="market-ni-kw" style="color:var(--muted)">관련 뉴스 없음</span></div>`;
-        body.dataset.rendered = "1";
-      }
+      _renderCatBody(i);
       body.style.display = "block";
       row.classList.add("open");
     }
+  }
+
+  function _renderCatBody(i) {
+    const body = document.getElementById(`cat-body-${i}`);
+    if (!body || !_marketData) return;
+    const cat = _marketData.categories[i];
+    if (!cat || !cat.items.length) {
+      body.innerHTML = `<div class="market-ni"><span class="market-ni-kw" style="color:var(--muted)">관련 뉴스 없음</span></div>`;
+      return;
+    }
+
+    const page       = _catPages[i] || 1;
+    const total      = cat.items.length;
+    const totalPages = Math.ceil(total / _CAT_PER_PAGE);
+    const start      = (page - 1) * _CAT_PER_PAGE;
+    const pageItems  = cat.items.slice(start, start + _CAT_PER_PAGE);
+
+    const pgHtml    = _catItemPgHtml(i, page, totalPages);
+    const countHtml = totalPages > 1
+      ? `<div class="feed-count">${total}건 · ${page}/${totalPages}페이지</div>` : '';
+
+    body.innerHTML = countHtml + pgHtml +
+      pageItems.map(item => {
+        const read = _visitedNews.has(item.link) ? ' mni-read' : '';
+        return `<div class="market-ni${read}">
+          <span class="market-ni-kw">${item.keyword}</span>
+          <a href="${item.link}" target="_blank" rel="noopener" onclick="_markRead(this.href,this)">${item.title}</a>
+          ${item.pubDate ? `<span class="market-ni-date">${fmtDate(item.pubDate)}</span>` : ""}
+        </div>`;
+      }).join("") + pgHtml;
+  }
+
+  function _catItemPgHtml(ci, cur, total) {
+    if (total <= 1) return '';
+    const MAX_VIS = 9;
+    let pages = [];
+    if (total <= MAX_VIS) {
+      pages = Array.from({length: total}, (_, k) => k + 1);
+    } else {
+      const half = Math.floor(MAX_VIS / 2);
+      let s = Math.max(1, cur - half), e = Math.min(total, s + MAX_VIS - 1);
+      if (e - s < MAX_VIS - 1) s = Math.max(1, e - MAX_VIS + 1);
+      if (s > 1) { pages.push(1); if (s > 2) pages.push('…'); }
+      for (let k = s; k <= e; k++) pages.push(k);
+      if (e < total) { if (e < total - 1) pages.push('…'); pages.push(total); }
+    }
+    return `<div class="feed-pagination">${pages.map(p =>
+      p === '…'
+        ? `<span class="feed-pg-sep">…</span>`
+        : `<button class="feed-pg-btn${p === cur ? ' pg-active' : ''}" onclick="goCatItemPage(${ci},${p})">${p}</button>`
+    ).join('')}</div>`;
+  }
+
+  function goCatItemPage(ci, page) {
+    _catPages[ci] = page;
+    _renderCatBody(ci);
+    document.getElementById(`cat-body-${ci}`)?.scrollIntoView({behavior: "smooth", block: "nearest"});
   }
 
   /* ── 뷰 전환 ── */
@@ -1792,41 +1982,104 @@
     }
   }
 
-  /* ── 시간순 전체 피드 렌더 ── */
-  function renderMarketFeed(market) {
-    const feedEl = document.getElementById("market-feed");
-    if (!feedEl) return;
+  /* ── 읽은 뉴스 (localStorage 영속 저장) ── */
+  const _visitedNews = new Set(JSON.parse(localStorage.getItem('_vn') || '[]'));
 
-    // 전 카테고리 기사 수집 → 링크 중복 제거 → 최신순 정렬
+  function _markRead(url, el) {
+    if (_visitedNews.has(url)) return;
+    _visitedNews.add(url);
+    const arr = [..._visitedNews];
+    if (arr.length > 1000) _visitedNews.delete(arr[0]);
+    try { localStorage.setItem('_vn', JSON.stringify([..._visitedNews])); } catch(e) {}
+    if (el) {
+      const li = el.closest('.ni, .market-ni, .mf-item');
+      if (!li) return;
+      if (li.classList.contains('ni'))        li.classList.add('ni-read');
+      else if (li.classList.contains('market-ni')) li.classList.add('mni-read');
+      else                                    li.classList.add('mfi-read');
+    }
+  }
+
+  /* ── 시간순 전체 피드 (페이지네이션) ── */
+  let _feedAllItems  = [];
+  let _feedPage      = 1;
+  const _FEED_PER_PAGE = 50;
+
+  function renderMarketFeed(market) {
     const seen = new Set();
     const all  = [];
     for (const cat of market.categories) {
       for (const item of cat.items) {
-        if (!seen.has(item.link)) {
-          seen.add(item.link);
-          all.push(item);
-        }
+        if (!seen.has(item.link)) { seen.add(item.link); all.push(item); }
       }
     }
     all.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+    _feedAllItems = all;
+    _feedPage     = 1;
+    _renderFeedPage();
+  }
 
-    if (!all.length) {
+  function _makePgHtml(cur, total, fn) {
+    if (total <= 1) return '';
+    const MAX_VIS = 9;
+    let pages = [];
+    if (total <= MAX_VIS) {
+      pages = Array.from({length: total}, (_, i) => i + 1);
+    } else {
+      const half = Math.floor(MAX_VIS / 2);
+      let s = Math.max(1, cur - half);
+      let e = Math.min(total, s + MAX_VIS - 1);
+      if (e - s < MAX_VIS - 1) s = Math.max(1, e - MAX_VIS + 1);
+      if (s > 1) { pages.push(1); if (s > 2) pages.push('…'); }
+      for (let i = s; i <= e; i++) pages.push(i);
+      if (e < total) { if (e < total - 1) pages.push('…'); pages.push(total); }
+    }
+    const btns = pages.map(p =>
+      p === '…'
+        ? `<span class="feed-pg-sep">…</span>`
+        : `<button class="feed-pg-btn${p === cur ? ' pg-active' : ''}" onclick="${fn}(${p})">${p}</button>`
+    ).join('');
+    return `<div class="feed-pagination">${btns}</div>`;
+  }
+
+  function _feedPaginationHtml(totalPages) {
+    return _makePgHtml(_feedPage, totalPages, 'goFeedPage');
+  }
+
+  function _renderFeedPage() {
+    const feedEl = document.getElementById("market-feed");
+    if (!feedEl) return;
+    if (!_feedAllItems.length) {
       feedEl.innerHTML = `<div class="market-empty">뉴스를 불러오지 못했습니다.</div>`;
       return;
     }
+    const total      = _feedAllItems.length;
+    const totalPages = Math.ceil(total / _FEED_PER_PAGE);
+    const start      = (_feedPage - 1) * _FEED_PER_PAGE;
+    const pageItems  = _feedAllItems.slice(start, start + _FEED_PER_PAGE);
+    const pgHtml     = _feedPaginationHtml(totalPages);
+    const countHtml  = `<div class="feed-count">전체 ${total.toLocaleString()}건 · ${_feedPage}/${totalPages}페이지</div>`;
 
-    feedEl.innerHTML = all.map(item => `
-      <div class="mf-item">
+    feedEl.innerHTML = countHtml + pgHtml + pageItems.map(item => {
+      const read = _visitedNews.has(item.link) ? ' mfi-read' : '';
+      return `<div class="mf-item${read}">
         <div class="mf-tags">
-          ${item.cat  ? `<span class="mf-cat">${item.cat}</span>` : ""}
+          ${item.cat ? `<span class="mf-cat">${item.cat}</span>` : ""}
           <span class="mf-kw">${item.keyword}</span>
         </div>
-        <a href="${item.link}" target="_blank" rel="noopener">${item.title}</a>
+        <a href="${item.link}" target="_blank" rel="noopener" onclick="_markRead(this.href,this)">${item.title}</a>
         <div class="mf-meta">
           ${item.source ? `<span class="mf-source">${item.source}</span><span>·</span>` : ""}
           <span>${fmtDate(item.pubDate)}</span>
         </div>
-      </div>`).join("");
+      </div>`;
+    }).join("") + pgHtml;
+  }
+
+  function goFeedPage(page) {
+    _feedPage = page;
+    _renderFeedPage();
+    document.getElementById("market-feed")?.scrollIntoView({behavior: "smooth", block: "start"});
   }
 
   /* ── 뉴스 아이템 HTML 빌더 ── */
@@ -1834,8 +2087,9 @@
     if (!news || !news.length) return `<li class="no-news">${noMsg}</li>`;
     return news.map(n => {
       const meta = [n.source, n.pubDate ? fmtDate(n.pubDate) : ""].filter(Boolean).join(" · ");
-      return `<li class="ni">
-        <a href="${n.link}" target="_blank" rel="noopener">${n.title}</a>
+      const read = _visitedNews.has(n.link) ? ' ni-read' : '';
+      return `<li class="ni${read}">
+        <a href="${n.link}" target="_blank" rel="noopener" onclick="_markRead(this.href,this)">${n.title}</a>
         ${meta ? `<span class="ni-date">${meta}</span>` : ""}
       </li>`;
     }).join("");
@@ -1932,39 +2186,10 @@
       </span>`;
   }
 
-  /* ── 카운트다운 ── */
-  function startNewsCountdown(fetchedAt) {
-    if (newsTimer) clearInterval(newsTimer);
-    nextNews = fetchedAt * 1000 + NEWS_TTL;
-    newsTimer = setInterval(() => {
-      const rem = nextNews - Date.now();
-      if (rem <= 0) { clearInterval(newsTimer); loadAll(); return; }
-      document.getElementById("news-cd").textContent = fmt(rem);
-    }, 1000);
-  }
-
-  function startPriceCountdown() {
-    if (priceTimer) clearInterval(priceTimer);
-    if (pricePoll)  clearInterval(pricePoll);
-    nextPrice = Date.now() + PRICE_TTL;
-    priceTimer = setInterval(() => {
-      const rem = nextPrice - Date.now();
-      if (rem <= 0) { clearInterval(priceTimer); return; }
-      document.getElementById("price-cd").textContent = fmt(rem);
-    }, 1000);
-    pricePoll = setInterval(loadPrices, PRICE_TTL);
-  }
-
-  function startMarketAutoRefresh() {
-    if (marketPoll) clearInterval(marketPoll);
-    marketNextAt = Date.now() + MARKET_REFRESH;
-    marketPoll = setInterval(() => {
-      const rem = marketNextAt - Date.now();
-      const cdEl = document.getElementById("market-cd");
-      if (cdEl) cdEl.textContent = rem > 0 ? `갱신 ${fmt(rem)}` : "";
-      if (rem <= 0) loadMarket();
-    }, 1000);
-  }
+  /* 자동 갱신 비활성화 — 수동 새로고침 전용 */
+  function startNewsCountdown()     {}
+  function startPriceCountdown()    {}
+  function startMarketAutoRefresh() {}
 
   function fmt(ms) {
     const m = String(Math.floor(ms / 60000)).padStart(2, "0");

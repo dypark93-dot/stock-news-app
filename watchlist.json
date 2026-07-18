@@ -15,11 +15,6 @@
     "market": "KR"
   },
   {
-    "name": "비츠로셀",
-    "ticker": "051360",
-    "market": "KR"
-  },
-  {
     "name": "HPSP",
     "ticker": "403870",
     "market": "KR"
@@ -67,6 +62,26 @@
   {
     "name": "Dell Technologies Inc.",
     "ticker": "DELL",
+    "market": "US"
+  },
+  {
+    "name": "비츠로셀",
+    "ticker": "082920",
+    "market": "KR"
+  },
+  {
+    "name": "Micron Technology, Inc.",
+    "ticker": "MU",
+    "market": "US"
+  },
+  {
+    "name": "Direxion Daily Semiconductor Bu",
+    "ticker": "SOXL",
+    "market": "US"
+  },
+  {
+    "name": "SK hynix Inc.",
+    "ticker": "SKHY",
     "market": "US"
   }
 ]

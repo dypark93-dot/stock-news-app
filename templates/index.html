@@ -568,6 +568,8 @@
     .gc-table tr:last-child td { border-bottom:none; }
     .gc-name { font-weight:600; font-size:.8rem; }
     .gc-tkr  { font-size:.62rem; color:var(--muted); margin-left:3px; }
+    .gc-link { text-decoration:none; color:inherit; }
+    .gc-link:hover .gc-name { text-decoration:underline; color:var(--amber); }
     .gc-pass { color:#34d399; font-weight:700; }
     .gc-fail { color:var(--muted); }
     .gc-prog { text-align:center; padding:18px; color:var(--muted); font-size:.85rem; }
@@ -2302,7 +2304,7 @@
             <th>ROE(3y평균)</th><th>ROA(3y평균)</th><th>OPM(3y평균)</th>
           </tr></thead>
           <tbody>${stocks.map(r => `<tr>
-            <td><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></td>
+            <td><a href="https://finance.naver.com/item/coinfo.naver?code=${r.ticker}" target="_blank" rel="noopener" class="gc-link"><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></a></td>
             <td>${_fmtThresh(r.roe,   15, '%')}</td>
             <td>${_fmtThresh(r.roa,    7, '%')}</td>
             <td>${_fmtThresh(r.opm,   10, '%')}</td>
@@ -2313,7 +2315,7 @@
         </table></div>`;
     } else {
       cont.innerHTML = `
-        <div class="gc-criteria">기준: 매출·순익·영업익·EBITDA 성장 10%↑ · OPM≥10% · ROE≥15% · ROA≥7% · 이자보상≥2x</div>
+        <div class="gc-criteria">기준: 매출·순익·EBITDA 3년성장 10%↑ · OPM≥10% · ROE≥15% · 이자보상≥2x</div>
         <div class="gc-wrap"><table class="gc-table">
           <thead><tr>
             <th>종목명</th>
@@ -2321,7 +2323,7 @@
             <th>OPM(3y)</th><th>ROE(3y)</th><th>ROA(3y)</th><th>이자보상</th>
           </tr></thead>
           <tbody>${stocks.map(r => `<tr>
-            <td><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></td>
+            <td><a href="https://finance.naver.com/item/coinfo.naver?code=${r.ticker}" target="_blank" rel="noopener" class="gc-link"><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></a></td>
             <td>${_fmtThresh(r.rev_cagr,   10, '%')}</td>
             <td>${_fmtThresh(r.ni_cagr,    10, '%')}</td>
             <td>${_fmtThresh(r.ebitda_cagr,10, '%')}</td>

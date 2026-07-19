@@ -14,6 +14,12 @@ import pandas as pd
 import anthropic
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    from pykrx import stock as _pykrx
+    _PYKRX_OK = True
+except Exception:
+    _PYKRX_OK = False
 from urllib.parse import urlparse, quote
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
@@ -711,35 +717,87 @@ def api_broker_reports():
 
 
 # ── 위대한 기업 찾기 (팻 도시 / 다니엘 타운 기준) ─────────────────────────
-GREAT_CO_LIST = [
-    ("삼성전자",      "005930.KS"), ("SK하이닉스",    "000660.KS"),
-    ("현대자동차",    "005380.KS"), ("기아",           "000270.KS"),
-    ("POSCO홀딩스",   "005490.KS"), ("LG화학",         "051910.KS"),
-    ("삼성SDI",       "006400.KS"), ("KB금융",         "105560.KS"),
-    ("신한지주",      "055550.KS"), ("하나금융지주",   "086790.KS"),
-    ("현대모비스",    "012330.KS"), ("NAVER",          "035420.KS"),
-    ("삼성전기",      "009150.KS"), ("고려아연",       "010130.KS"),
-    ("LG전자",        "066570.KS"), ("SK텔레콤",       "017670.KS"),
+
+# pykrx 미설치 시 폴백 종목 리스트
+_GC_FALLBACK = [
+    ("삼성전자",      "005930.KS"), ("SK하이닉스",      "000660.KS"),
+    ("현대자동차",    "005380.KS"), ("기아",             "000270.KS"),
+    ("POSCO홀딩스",   "005490.KS"), ("LG화학",           "051910.KS"),
+    ("삼성SDI",       "006400.KS"), ("KB금융",           "105560.KS"),
+    ("신한지주",      "055550.KS"), ("하나금융지주",     "086790.KS"),
+    ("현대모비스",    "012330.KS"), ("NAVER",            "035420.KS"),
+    ("삼성전기",      "009150.KS"), ("고려아연",         "010130.KS"),
+    ("LG전자",        "066570.KS"), ("SK텔레콤",         "017670.KS"),
     ("삼성물산",      "028260.KS"), ("한화에어로스페이스","012450.KS"),
-    ("포스코퓨처엠",  "003670.KS"), ("LG이노텍",      "011070.KS"),
-    ("현대글로비스",  "086280.KS"), ("메리츠금융지주", "138040.KS"),
-    ("삼성화재",      "000810.KS"), ("오리온",         "271560.KS"),
-    ("크래프톤",      "259960.KS"), ("KT",             "030200.KS"),
-    ("LG",            "003550.KS"), ("SK",             "034730.KS"),
-    ("두산에너빌리티","034020.KS"), ("S-Oil",          "010950.KS"),
-    ("우리금융지주",  "316140.KS"), ("CJ제일제당",     "097950.KS"),
-    ("현대제철",      "004020.KS"), ("엔씨소프트",     "036570.KS"),
-    ("두산밥캣",      "241560.KS"), ("GS홀딩스",       "078930.KS"),
-    ("셀트리온",      "068270.KS"), ("LG에너지솔루션", "373220.KS"),
-    ("카카오",        "035720.KS"), ("삼성바이오로직스","207940.KS"),
-    ("에코프로비엠",  "247540.KQ"), ("HLB",            "028300.KQ"),
-    ("알테오젠",      "196170.KQ"), ("코스맥스",       "192820.KS"),
-    ("F&F",           "383220.KS"), ("삼성카드",       "029780.KS"),
-    ("KT&G",          "033780.KS"), ("롯데웰푸드",     "280360.KS"),
-    ("한국금융지주",  "071050.KS"),
+    ("포스코퓨처엠",  "003670.KS"), ("LG이노텍",         "011070.KS"),
+    ("현대글로비스",  "086280.KS"), ("메리츠금융지주",   "138040.KS"),
+    ("삼성화재",      "000810.KS"), ("오리온",           "271560.KS"),
+    ("크래프톤",      "259960.KS"), ("KT",               "030200.KS"),
+    ("두산에너빌리티","034020.KS"), ("우리금융지주",     "316140.KS"),
+    ("CJ제일제당",    "097950.KS"), ("셀트리온",         "068270.KS"),
+    ("LG에너지솔루션","373220.KS"), ("삼성바이오로직스", "207940.KS"),
+    ("카카오",        "035720.KS"), ("F&F",              "383220.KS"),
+    ("KT&G",          "033780.KS"), ("코웨이",           "021240.KS"),
+    ("에코프로비엠",  "247540.KQ"), ("HLB",              "028300.KQ"),
+    ("알테오젠",      "196170.KQ"), ("코스맥스",         "192820.KS"),
+    ("파마리서치",    "214450.KQ"), ("비츠로셀",         "082920.KQ"),
+    ("피에스케이",    "319400.KQ"), ("코스메카코리아",   "241710.KQ"),
+    ("GST",           "083450.KQ"), ("코나아이",         "052400.KQ"),
+    ("삼양식품",      "003230.KS"), ("HD현대일렉트릭",   "267260.KS"),
+    ("현대로템",      "064350.KS"), ("HD현대마린솔루션", "443060.KS"),
+    ("두산밥캣",      "241560.KS"), ("달바글로벌",       "341960.KQ"),
+    ("메리츠화재",    "000060.KS"), ("한국금융지주",     "071050.KS"),
 ]
 
-_gc_cache = {"status": "idle", "patdorsey": [], "dantown": [], "fetched_at": 0, "progress": 0}
+
+def _get_kr_universe():
+    """pykrx로 KOSPI+KOSDAQ 전종목 조회 후 시총 300억↑·ROE추정 12%↑ 필터링.
+    Returns [(ticker_6, yf_ticker), ...]"""
+    if not _PYKRX_OK:
+        return [(yft.split(".")[0], yft) for _, yft in _GC_FALLBACK]
+
+    today = datetime.date.today()
+    for delta in range(7):
+        d = (today - datetime.timedelta(days=delta)).strftime("%Y%m%d")
+        try:
+            result = []
+            MIN_CAP = 30_000_000_000   # 300억 원
+            MIN_ROE = 12.0             # pykrx 사전필터 (느슨하게)
+
+            for mkt, sfx in [("KOSPI", ".KS"), ("KOSDAQ", ".KQ")]:
+                cap  = _pykrx.get_market_cap(d, market=mkt)
+                fund = _pykrx.get_market_fundamental(d, market=mkt)
+
+                if "시가총액" not in cap.columns:
+                    continue
+
+                for tkr in cap.index:
+                    if cap.at[tkr, "시가총액"] < MIN_CAP:
+                        continue
+
+                    # EPS/BPS = ROE (정확한 공식)
+                    if tkr in fund.index:
+                        try:
+                            eps = float(fund.at[tkr, "EPS"] or 0)
+                            bps = float(fund.at[tkr, "BPS"] or 0)
+                        except (ValueError, TypeError):
+                            eps = bps = 0
+                        if bps > 0 and not math.isnan(eps) and not math.isnan(bps):
+                            if (eps / bps) * 100 < MIN_ROE:
+                                continue  # ROE 낮은 종목 사전제거
+
+                    result.append((tkr, f"{tkr}{sfx}"))
+
+            if result:
+                return result
+        except Exception:
+            continue
+
+    return [(yft.split(".")[0], yft) for _, yft in _GC_FALLBACK]
+
+
+_gc_cache = {"status": "idle", "patdorsey": [], "dantown": [],
+             "fetched_at": 0, "progress": 0, "total": 0}
 GC_TTL = 86400   # 24시간
 
 
@@ -773,12 +831,19 @@ def _avg_ratio(num_s, den_s, years=3):
     return round(float((df["n"] / df["d"]).mean()) * 100, 1)
 
 
-def _screen_one(name, tkr):
+def _screen_one(t6, yf_t):
     try:
-        t = yf.Ticker(tkr)
+        t = yf.Ticker(yf_t)
         inf = t.info or {}
-        if not inf.get("regularMarketPrice") and not inf.get("previousClose"):
+
+        # ETF·가격데이터 없는 종목 제외
+        if inf.get("quoteType") == "ETF":
             return None
+        if not any(inf.get(k) for k in ("regularMarketPrice", "previousClose", "currentPrice")):
+            return None
+
+        # 영문명 우선, 한국명은 _run_gc_screen 에서 사후 교체
+        name = inf.get("shortName") or inf.get("longName") or t6
 
         roe_cur = inf.get("returnOnEquity")
         roa_cur = inf.get("returnOnAssets")
@@ -800,7 +865,6 @@ def _screen_one(name, tkr):
         se     = _gr(bs,  "Stockholders Equity", "Common Stock Equity",
                           "Total Equity Gross Minority Interest")
 
-        # 이자보상배율 (최근결산)
         int_cov = None
         if oi is not None and iexp is not None:
             oi_s = oi.dropna().sort_index(ascending=True)
@@ -811,8 +875,9 @@ def _screen_one(name, tkr):
                     int_cov = round(float(oi_s.iloc[-1]) / abs(ie_lat), 1)
 
         return {
-            "name": name, "ticker": tkr.split(".")[0],
-            "market": "KQ" if ".KQ" in tkr else "KS",
+            "name":   name,
+            "ticker": t6,
+            "market": "KQ" if ".KQ" in yf_t else "KS",
             "roe":    round(roe_cur * 100, 1) if roe_cur is not None else None,
             "roa":    round(roa_cur * 100, 1) if roa_cur is not None else None,
             "opm":    round(opm_cur * 100, 1) if opm_cur is not None else None,
@@ -821,9 +886,6 @@ def _screen_one(name, tkr):
             "opm_3y": _avg_ratio(oi, rev, 3),
             "rev_cagr":    _cagr_pct(rev, 3),
             "ni_cagr":     _cagr_pct(ni, 3),
-            "oi_cagr":     _cagr_pct(oi, 3),
-            "ta_cagr":     _cagr_pct(ta, 3),
-            "eps_cagr":    _cagr_pct(ni, 3),   # EPS ≈ NI (shares 변동 무시)
             "ebitda_cagr": _cagr_pct(ebitda, 3),
             "int_cov":     int_cov,
         }
@@ -844,11 +906,13 @@ def _passes_patdorsey(r):
 
 
 def _passes_dantown(r):
+    # 다니엘 타운 Big5: 매출/순이익/EBITDA 3년 CAGR ≥10%, 영업이익률 ≥10%, ROE ≥15%, 이자보상배율 ≥2
     return (
-        _ok(r, "ni_cagr", 10) and _ok(r, "oi_cagr", 10) and
-        _ok(r, "ta_cagr", 10) and _ok(r, "rev_cagr", 10) and
-        _ok(r, "eps_cagr", 10) and _ok(r, "ebitda_cagr", 10) and
-        _ok(r, "opm_3y", 10) and _ok(r, "roe_3y", 15) and _ok(r, "roa_3y", 7) and
+        _ok(r, "rev_cagr",    10) and
+        _ok(r, "ni_cagr",     10) and
+        _ok(r, "ebitda_cagr", 10) and
+        _ok(r, "opm_3y",      10) and
+        _ok(r, "roe_3y",      15) and
         (r.get("int_cov") is None or r["int_cov"] >= 2)
     )
 
@@ -856,15 +920,46 @@ def _passes_dantown(r):
 def _run_gc_screen():
     _gc_cache["status"] = "loading"
     _gc_cache["progress"] = 0
+
+    # 1. 전종목 유니버스 수집 (pykrx 또는 폴백)
+    universe = _get_kr_universe()
+    _gc_cache["total"] = len(universe)
+
+    # 2. yfinance 병렬 스크리닝
     results = []
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futs = {ex.submit(_screen_one, n, t): (n, t) for n, t in GREAT_CO_LIST}
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_screen_one, t6, yf_t): t6 for t6, yf_t in universe}
         for i, fut in enumerate(as_completed(futs)):
             r = fut.result()
             if r:
                 results.append(r)
             _gc_cache["progress"] = i + 1
-    _gc_cache["patdorsey"]  = sorted(
+
+    # 3. 합격 종목에 한해 pykrx 한국어 이름 교체 (소수이므로 빠름)
+    if _PYKRX_OK:
+        qualifying_tkrs = {r["ticker"] for r in results
+                           if _passes_patdorsey(r) or _passes_dantown(r)}
+        if qualifying_tkrs:
+            try:
+                with ThreadPoolExecutor(max_workers=10) as ex:
+                    def _kname(t6):
+                        try:
+                            return t6, (_pykrx.get_market_ticker_name(t6) or "")
+                        except Exception:
+                            return t6, ""
+                    name_map = {}
+                    for fut in as_completed(
+                            [ex.submit(_kname, t) for t in qualifying_tkrs]):
+                        t6, nm = fut.result()
+                        if nm:
+                            name_map[t6] = nm
+                for r in results:
+                    if r["ticker"] in name_map:
+                        r["name"] = name_map[r["ticker"]]
+            except Exception:
+                pass
+
+    _gc_cache["patdorsey"] = sorted(
         [r for r in results if _passes_patdorsey(r)],
         key=lambda x: x.get("roe_3y") or x.get("roe") or 0, reverse=True)
     _gc_cache["dantown"] = sorted(
@@ -885,7 +980,7 @@ def api_great_companies():
     return jsonify({
         "status":    c["status"],
         "progress":  c["progress"],
-        "total":     len(GREAT_CO_LIST),
+        "total":     c["total"],
         "patdorsey": c["patdorsey"],
         "dantown":   c["dantown"],
     })

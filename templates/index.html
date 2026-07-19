@@ -1865,7 +1865,6 @@
         priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
       ss.setData(macdRes.sd);
     }
-    macdChart.timeScale().fitContent();
 
     /* ── 3. RSI 차트 ── */
     const rsiEl    = mkPanel(110, 'RSI (14)', true);
@@ -1882,18 +1881,27 @@
       rs.createPriceLine({ price:70, color:'#ef4444aa', lineWidth:1, lineStyle:LS.Dashed, axisLabelVisible:true });
       rs.createPriceLine({ price:30, color:'#3b82f6aa', lineWidth:1, lineStyle:LS.Dashed, axisLabelVisible:true });
     }
-    rsiChart.timeScale().fitContent();
-
-    /* ── 시간축 동기화 ── */
+    /* ── 시간축 동기화 (시간값 기반 — 인덱스 기반 시 MACD/RSI 날짜 어긋남 방지) ── */
     const allCharts = [mainChart, macdChart, rsiChart];
     let _sync = false;
     allCharts.forEach(ch => {
-      ch.timeScale().subscribeVisibleLogicalRangeChange(rng => {
+      ch.timeScale().subscribeVisibleTimeRangeChange(rng => {
         if (_sync || !rng) return;
         _sync = true;
-        allCharts.forEach(o => { if (o !== ch) o.timeScale().setVisibleLogicalRange(rng); });
+        allCharts.forEach(o => { if (o !== ch) o.timeScale().setVisibleRange(rng); });
         _sync = false;
       });
+    });
+
+    /* 메인 차트 기준으로 MACD·RSI 초기 범위 맞춤 */
+    requestAnimationFrame(() => {
+      const rng = mainChart.timeScale().getVisibleRange();
+      if (rng) {
+        _sync = true;
+        macdChart.timeScale().setVisibleRange(rng);
+        rsiChart.timeScale().setVisibleRange(rng);
+        _sync = false;
+      }
     });
 
     _gmcChart = { remove() { allCharts.forEach(c => c.remove()); } };

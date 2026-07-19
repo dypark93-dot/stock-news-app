@@ -2350,21 +2350,26 @@
       return;
     }
 
-    const kwChips = topKws.map(k =>
+    const kwChips    = topKws.map(k =>
       `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
     ).join('');
-    el.innerHTML = `<div class="pers-kw-bar">${kwChips}</div>
-      <div class="pers-loading">관심 키워드로 뉴스 검색 중…</div>`;
+    const kwBar      = `<div class="pers-kw-bar">${kwChips}</div>`;
+    // 뉴스 로딩 전에도 규칙 기반 추천은 즉시 표시
+    const ruleStocks  = _getRuleStocks(topKws);
+    const ruleSection = _renderRuleStocksHtml(ruleStocks);
+    el.innerHTML = kwBar + ruleSection +
+      `<div class="pers-loading">관심 키워드로 뉴스 검색 중…</div>`;
 
     try {
       const resp = await fetch(`/api/personalized?kw=${encodeURIComponent(topKws.join(','))}`);
       const data = await resp.json();
       _persAllItems  = data.items || [];
       _persPage      = 1;
-      _benefitResult = null;   // 새 키워드셋이면 이전 분석 초기화
+      _benefitResult = null;
       _renderPersPage();
     } catch(e) {
-      el.innerHTML = `<div class="pers-empty">뉴스 로딩 실패. 잠시 후 다시 시도해주세요.</div>`;
+      el.innerHTML = kwBar + ruleSection +
+        `<div class="pers-empty">뉴스 로딩 실패. 잠시 후 다시 시도해주세요.</div>`;
     }
   }
 
@@ -2378,14 +2383,14 @@
     ).join('');
     const kwBar = `<div class="pers-kw-bar">${kwChips}</div>`;
 
-    if (!_persAllItems.length) {
-      el.innerHTML = kwBar + `<div class="pers-empty">검색 결과가 없습니다.</div>`;
-      return;
-    }
-
-    // 규칙 기반 즉시 추천 (API 호출 없음)
+    // 규칙 기반 즉시 추천 — 뉴스 유무와 무관하게 항상 먼저 계산
     const ruleStocks  = _getRuleStocks(topKws);
     const ruleSection = _renderRuleStocksHtml(ruleStocks);
+
+    if (!_persAllItems.length) {
+      el.innerHTML = kwBar + ruleSection + `<div class="pers-empty">검색 결과가 없습니다.</div>`;
+      return;
+    }
 
     // Claude AI 심층 분석 버튼
     const btnLabel = _benefitLoading

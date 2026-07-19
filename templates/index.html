@@ -2152,6 +2152,183 @@
     }
   }
 
+  /* ── 키워드 → 종목 규칙 매핑 ── */
+  const _RULE_MAP = {
+    // 반도체
+    '반도체':    [
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'메모리·파운드리 통합 수혜' },
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'HBM 세계 1위 공급사' },
+      { name:'SOXL',             ticker:'SOXL',   market:'US', reason:'반도체 섹터 3배 ETF' },
+      { name:'Micron',           ticker:'MU',     market:'US', reason:'D램·낸드 글로벌 3위' },
+      { name:'AMAT',             ticker:'AMAT',   market:'US', reason:'반도체 장비 선도 기업' },
+    ],
+    'HBM':       [
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'HBM 세계 1위, AI 서버 핵심 공급' },
+      { name:'Micron',           ticker:'MU',     market:'US', reason:'HBM3E 양산 진입' },
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'HBM 2위, 캐치업 전략 진행 중' },
+    ],
+    'TSMC':      [
+      { name:'TSMC',             ticker:'TSM',    market:'US', reason:'파운드리 세계 1위 당사' },
+      { name:'AMAT',             ticker:'AMAT',   market:'US', reason:'TSMC 핵심 장비 공급사' },
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'파운드리 2위, 경쟁·협력 구도' },
+    ],
+    'AI':        [
+      { name:'NVIDIA',           ticker:'NVDA',   market:'US', reason:'AI GPU 시장 점유율 80%+' },
+      { name:'Broadcom',         ticker:'AVGO',   market:'US', reason:'AI ASIC·네트워킹 칩 선도' },
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'AI 서버용 HBM 핵심 공급사' },
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'AI 서버 DRAM·HBM 공급' },
+    ],
+    '인공지능':  [
+      { name:'NVIDIA',           ticker:'NVDA',   market:'US', reason:'AI 인프라 핵심 GPU 독점적 지위' },
+      { name:'Microsoft',        ticker:'MSFT',   market:'US', reason:'Azure AI·오픈AI 파트너십' },
+      { name:'Broadcom',         ticker:'AVGO',   market:'US', reason:'AI 커스텀 칩 설계' },
+    ],
+    '엔비디아':  [
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'엔비디아 HBM 1차 공급사' },
+      { name:'NVIDIA',           ticker:'NVDA',   market:'US', reason:'직접 당사' },
+      { name:'Broadcom',         ticker:'AVGO',   market:'US', reason:'엔비디아 협력 네트워킹' },
+    ],
+    '데이터센터':[
+      { name:'NVIDIA',           ticker:'NVDA',   market:'US', reason:'데이터센터 GPU 독보적 1위' },
+      { name:'Microsoft',        ticker:'MSFT',   market:'US', reason:'Azure 데이터센터 글로벌 2위' },
+      { name:'Amazon',           ticker:'AMZN',   market:'US', reason:'AWS 데이터센터 글로벌 1위' },
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'AI 서버 메모리 최대 수혜' },
+    ],
+    '클라우드':  [
+      { name:'Microsoft',        ticker:'MSFT',   market:'US', reason:'Azure 클라우드 2위' },
+      { name:'Amazon',           ticker:'AMZN',   market:'US', reason:'AWS 클라우드 1위' },
+      { name:'Google',           ticker:'GOOGL',  market:'US', reason:'GCP 클라우드 3위' },
+    ],
+    // 2차전지·EV
+    '2차전지':   [
+      { name:'LG에너지솔루션',   ticker:'373220', market:'KR', reason:'글로벌 배터리 2위' },
+      { name:'삼성SDI',          ticker:'006400', market:'KR', reason:'프리미엄·전고체 배터리 강자' },
+      { name:'POSCO홀딩스',      ticker:'005490', market:'KR', reason:'양극재·리튬 수직계열화' },
+    ],
+    '배터리':    [
+      { name:'LG에너지솔루션',   ticker:'373220', market:'KR', reason:'글로벌 배터리 2위' },
+      { name:'삼성SDI',          ticker:'006400', market:'KR', reason:'전고체 배터리 개발 선두' },
+    ],
+    '전기차':    [
+      { name:'LG에너지솔루션',   ticker:'373220', market:'KR', reason:'EV 배터리 최대 수혜' },
+      { name:'현대차',           ticker:'005380', market:'KR', reason:'아이오닉 EV 글로벌 판매' },
+      { name:'기아',             ticker:'000270', market:'KR', reason:'EV6·EV9 글로벌 확대' },
+    ],
+    // 방산
+    '방산':      [
+      { name:'한화에어로스페이스',ticker:'012450', market:'KR', reason:'K9 자주포·천무 수출 선도' },
+      { name:'LIG넥스원',        ticker:'079550', market:'KR', reason:'유도무기 국내 1위' },
+      { name:'현대로템',         ticker:'064350', market:'KR', reason:'K2 전차·철도 방산 수혜' },
+      { name:'한국항공우주',     ticker:'047810', market:'KR', reason:'FA-50·헬기 수출 확대' },
+    ],
+    'K방산':     [
+      { name:'한화에어로스페이스',ticker:'012450', market:'KR', reason:'K방산 수출 대표주' },
+      { name:'LIG넥스원',        ticker:'079550', market:'KR', reason:'미사일·레이더 수출' },
+      { name:'현대로템',         ticker:'064350', market:'KR', reason:'K2 전차 폴란드 등 수출' },
+    ],
+    // 바이오·제약
+    '바이오':    [
+      { name:'삼성바이오로직스', ticker:'207940', market:'KR', reason:'CMO 세계 최대급 시설' },
+      { name:'셀트리온',         ticker:'068270', market:'KR', reason:'바이오시밀러 글로벌 선도' },
+    ],
+    '신약':      [
+      { name:'유한양행',         ticker:'000100', market:'KR', reason:'렉라자 글로벌 기술수출' },
+      { name:'한미약품',         ticker:'128940', market:'KR', reason:'비만약·당뇨 파이프라인' },
+    ],
+    // 원전
+    '원전':      [
+      { name:'두산에너빌리티',   ticker:'034020', market:'KR', reason:'원전 핵심 기자재 국내 독점' },
+      { name:'한전KPS',          ticker:'051600', market:'KR', reason:'원전 정비 독점 사업자' },
+      { name:'한국전력',         ticker:'015760', market:'KR', reason:'원전 확대 정책 직접 수혜' },
+    ],
+    '원자력':    [
+      { name:'두산에너빌리티',   ticker:'034020', market:'KR', reason:'원자로·터빈 국내 독점' },
+      { name:'한전KPS',          ticker:'051600', market:'KR', reason:'원전 정비 국내 독점' },
+    ],
+    // 자동차
+    '현대차':    [
+      { name:'현대차',           ticker:'005380', market:'KR', reason:'국내 완성차 1위' },
+      { name:'현대모비스',       ticker:'012330', market:'KR', reason:'현대차 핵심 부품 계열사' },
+      { name:'기아',             ticker:'000270', market:'KR', reason:'현대차그룹 형제사' },
+    ],
+    // 거시경제
+    '금리인하':  [
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'성장주·기술주 수혜' },
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'고PER 성장주 부양' },
+      { name:'NVIDIA',           ticker:'NVDA',   market:'US', reason:'금리 인하 시 성장주 수혜' },
+    ],
+    '달러':      [
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'달러 약세 시 수출 이익 환산 감소 주의' },
+      { name:'현대차',           ticker:'005380', market:'KR', reason:'글로벌 수출 비중 높아 달러 영향 큼' },
+    ],
+    // 지정학
+    '우크라이나':[
+      { name:'한화에어로스페이스',ticker:'012450', market:'KR', reason:'폴란드 K9·천무 대규모 수출' },
+      { name:'LIG넥스원',        ticker:'079550', market:'KR', reason:'방산 수출 수혜' },
+    ],
+    '중동':      [
+      { name:'한화에어로스페이스',ticker:'012450', market:'KR', reason:'중동 방산 수출 확대' },
+      { name:'HD현대중공업',     ticker:'329180', market:'KR', reason:'중동 함정 수주 기대' },
+    ],
+    // 태양광·재생에너지
+    '태양광':    [
+      { name:'OCI홀딩스',        ticker:'010060', market:'KR', reason:'폴리실리콘 국내 1위' },
+      { name:'한화솔루션',       ticker:'009830', market:'KR', reason:'태양광 모듈 글로벌 생산' },
+    ],
+    // 삼성전자 직접 언급
+    '삼성전자':  [
+      { name:'삼성전자',         ticker:'005930', market:'KR', reason:'직접 당사' },
+      { name:'삼성SDI',          ticker:'006400', market:'KR', reason:'삼성 배터리 계열사' },
+      { name:'삼성바이오로직스', ticker:'207940', market:'KR', reason:'삼성 바이오 계열사' },
+    ],
+    'SK하이닉스':[
+      { name:'SK하이닉스',       ticker:'000660', market:'KR', reason:'직접 당사' },
+      { name:'SOXL',             ticker:'SOXL',   market:'US', reason:'반도체 ETF 간접 수혜' },
+    ],
+  };
+
+  /* 상위 키워드 → 매칭 종목 추출 (가중치·빈도 합산, 중복 제거) */
+  function _getRuleStocks(topKws) {
+    const map = {};
+    topKws.forEach(kw => {
+      (_RULE_MAP[kw] || []).forEach(s => {
+        const key = s.ticker || s.name;
+        if (!map[key]) map[key] = { ...s, matchKws: [], score: 0 };
+        if (!map[key].matchKws.includes(kw)) {
+          map[key].matchKws.push(kw);
+          map[key].score += (_clickedKws[kw] || 1);
+        }
+      });
+    });
+    return Object.values(map)
+      .sort((a, b) => b.score - a.score || b.matchKws.length - a.matchKws.length)
+      .slice(0, 10);
+  }
+
+  function _renderRuleStocksHtml(stocks) {
+    if (!stocks.length) return '';
+    const items = stocks.map(s => {
+      const badge  = s.market === 'KR'
+        ? `<span class="benefit-market-kr">KR</span>`
+        : `<span class="benefit-market-us">US</span>`;
+      const ticker = s.ticker ? `<span class="benefit-stock-ticker">${s.ticker}</span>` : '';
+      const kws    = s.matchKws.map(k =>
+        `<span class="pers-match-kw">${k}</span>`).join(' ');
+      return `<div class="benefit-stock">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:3px">
+            ${badge}<span class="benefit-stock-name">${s.name}</span>${ticker}${kws}
+          </div>
+          <div class="benefit-stock-reason">${s.reason}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="benefit-panel">
+      <div class="benefit-theme-hd" style="margin-bottom:8px">📊 즉시 추천 종목 (규칙 기반)</div>
+      ${items}
+    </div>`;
+  }
+
   /* ── 맞춤 뉴스 렌더링 ── */
   let _persAllItems  = [];
   let _persPage      = 1;
@@ -2206,9 +2383,14 @@
       return;
     }
 
+    // 규칙 기반 즉시 추천 (API 호출 없음)
+    const ruleStocks  = _getRuleStocks(topKws);
+    const ruleSection = _renderRuleStocksHtml(ruleStocks);
+
+    // Claude AI 심층 분석 버튼
     const btnLabel = _benefitLoading
       ? '⏳ AI 분석 중…'
-      : (_benefitResult ? '🔄 수혜 종목 재분석' : '🔍 AI 수혜 종목 분석');
+      : (_benefitResult ? '🔄 AI 재분석' : '🔍 AI 심층 분석');
     const benefitBtn = `<button class="benefit-btn" id="benefit-btn"
       onclick="fetchBenefits()" ${_benefitLoading ? 'disabled' : ''}>${btnLabel}</button>`;
     const benefitPanel = _benefitResult ? _renderBenefitHtml(_benefitResult) : '';
@@ -2234,7 +2416,7 @@
       </div>`;
     }).join('');
 
-    el.innerHTML = kwBar + benefitBtn + benefitPanel + countHtml + pgHtml + items + pgHtml;
+    el.innerHTML = kwBar + ruleSection + benefitBtn + benefitPanel + countHtml + pgHtml + items + pgHtml;
   }
 
   async function fetchBenefits() {

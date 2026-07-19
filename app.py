@@ -980,6 +980,9 @@ GLOBAL_MARKET_CONFIG = [
     ("원자재",      "CL=F",       "WTI유 ($/bbl)"),
     ("원자재",      "BZ=F",       "브렌트유 ($/bbl)"),
     ("원자재",      "HG=F",       "구리 ($/lb)"),
+    ("원자재",      "BTC-USD",    "비트코인 ($)"),
+    ("원자재",      "ETH-USD",    "이더리움 ($)"),
+    ("원자재",      "SOL-USD",    "솔라나 ($)"),
     ("환율",        "USDKRW=X",   "달러/원"),
     ("환율",        "USDJPY=X",   "달러/엔"),
     ("환율",        "EURUSD=X",   "유로/달러"),
@@ -1001,7 +1004,7 @@ def _gm_clean(v):
 def _fetch_gm_single(cfg):
     group, sym, name = cfg
     try:
-        h = yf.Ticker(sym).history(period="2d")
+        h = yf.Ticker(sym).history(period="5d")
         if len(h) < 1:
             return group, sym, name, None
         price = _gm_clean(h["Close"].iloc[-1])

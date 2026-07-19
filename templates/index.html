@@ -508,22 +508,35 @@
     .mf-source { font-weight: 600; }
 
     /* ── 증권사 리포트 탭 ── */
+    .br-subnav {
+      display: flex; flex-direction: column;
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+    }
+    .br-subbtn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 14px;
+      background: transparent; border: none;
+      color: var(--muted); font-size: .82rem; font-weight: 500;
+      cursor: pointer; text-align: left;
+      transition: color .12s, background .12s;
+    }
+    .br-subbtn::before {
+      content: 'ㅣ'; color: var(--border2);
+      font-size: .75rem; flex-shrink: 0;
+    }
+    .br-subbtn:hover { color: var(--text); background: rgba(255,255,255,.04); }
+    .br-subbtn.br-sub-active {
+      color: var(--amber); font-weight: 700;
+    }
+    .br-subbtn.br-sub-active::before { color: var(--amber); }
+    .br-list { padding: 0 12px; }
     .br-item {
       display: flex; align-items: flex-start; gap: .45rem;
-      padding: .42rem 0;
+      padding: .44rem 0;
       border-bottom: 1px solid var(--border);
       font-size: .82rem;
     }
     .br-item:last-child { border-bottom: none; }
-    .br-type {
-      flex-shrink: 0; margin-top: .1rem;
-      font-size: .6rem; font-weight: 700;
-      padding: .1rem .32rem; border-radius: 3px;
-      background: rgba(99,102,241,.15); color: #818cf8;
-      white-space: nowrap;
-    }
-    .br-type.br-economy  { background: rgba(16,185,129,.12); color: #34d399; }
-    .br-type.br-market   { background: rgba(245,158,11,.12);  color: #fbbf24; }
     .br-body { flex: 1; min-width: 0; }
     .br-body a {
       color: var(--link); text-decoration: none;
@@ -1120,7 +1133,17 @@
       </div>
       <div id="market-feed"       style="display:none"></div>
       <div id="market-personalized" style="display:none"></div>
-      <div id="market-broker"     style="display:none"></div>
+      <div id="market-broker" style="display:none">
+        <div class="br-subnav">
+          <button class="br-subbtn br-sub-active" data-btype="종목분석" onclick="loadBrokerType('종목분석')">종목분석 리포트</button>
+          <button class="br-subbtn" data-btype="산업분석" onclick="loadBrokerType('산업분석')">산업분석 리포트</button>
+          <button class="br-subbtn" data-btype="경제분석" onclick="loadBrokerType('경제분석')">경제분석 리포트</button>
+          <button class="br-subbtn" data-btype="시장분석" onclick="loadBrokerType('시장분석')">시장분석 리포트</button>
+        </div>
+        <div class="br-list" id="br-content">
+          <div class="br-loading">리포트를 불러오는 중…</div>
+        </div>
+      </div>
     </div>
 
     <!-- 52주 신고가 -->
@@ -2108,38 +2131,54 @@
     if (mode === "broker")   renderBrokerReports();
   }
 
-  /* ── 증권사 리포트 렌더 ── */
-  let _brokerRendered = false;
-  async function renderBrokerReports() {
-    const el = document.getElementById("market-broker");
-    if (_brokerRendered) return;
-    el.innerHTML = `<div class="br-loading">증권사 리포트 불러오는 중…</div>`;
-    try {
-      const resp = await fetch("/api/broker-reports");
-      const data = await resp.json();
-      if (!data.length) {
-        el.innerHTML = `<div class="br-empty">리포트를 불러오지 못했습니다.</div>`;
-        return;
-      }
-      const typeClass = { "업종분석": "", "경제분석": " br-economy", "시장분석": " br-market" };
-      el.innerHTML = data.map(r => {
-        const read  = _visitedNews.has(r.link) ? ' bri-read' : '';
-        const tCls  = typeClass[r.type] || '';
-        const firm  = r.firm ? `<span>${r.firm}</span>` : '';
-        return `<div class="br-item${read}">
-          <span class="br-type${tCls}">${r.type}</span>
-          <div class="br-body">
-            <a href="${r.link}" target="_blank" rel="noopener"
-               onclick="_markReadBr(this.href,this)">${r.title}</a>
-            ${firm ? `<div class="br-meta">${firm}</div>` : ''}
-          </div>
-          <span class="br-date">${r.date.slice(2).replace(/\./g,'/')}</span>
-        </div>`;
-      }).join("");
-      _brokerRendered = true;
-    } catch(e) {
-      el.innerHTML = `<div class="br-empty">오류가 발생했습니다.</div>`;
+  /* ── 증권사 리포트 하위 탭 ── */
+  const _brCache = {};   // type → data[]
+
+  function renderBrokerReports() {
+    // 탭을 처음 열 때 기본 유형 자동 로드
+    loadBrokerType('종목분석');
+  }
+
+  async function loadBrokerType(type) {
+    // 하위 버튼 활성화 갱신
+    document.querySelectorAll('.br-subbtn').forEach(b =>
+      b.classList.toggle('br-sub-active', b.dataset.btype === type));
+
+    const content = document.getElementById('br-content');
+
+    // 캐시 히트
+    if (_brCache[type]) {
+      _renderBrList(content, _brCache[type]);
+      return;
     }
+
+    content.innerHTML = `<div class="br-loading">불러오는 중…</div>`;
+    try {
+      const resp = await fetch(`/api/broker-reports?type=${encodeURIComponent(type)}`);
+      const data = await resp.json();
+      _brCache[type] = data;
+      _renderBrList(content, data);
+    } catch(e) {
+      content.innerHTML = `<div class="br-empty">오류가 발생했습니다.</div>`;
+    }
+  }
+
+  function _renderBrList(container, data) {
+    if (!data.length) {
+      container.innerHTML = `<div class="br-empty">리포트를 불러오지 못했습니다.</div>`;
+      return;
+    }
+    container.innerHTML = data.map(r => {
+      const read = _visitedNews.has(r.link) ? ' bri-read' : '';
+      return `<div class="br-item${read}">
+        <div class="br-body">
+          <a href="${r.link}" target="_blank" rel="noopener"
+             onclick="_markReadBr(this.href,this)">${r.title}</a>
+          ${r.firm ? `<div class="br-meta">${r.firm}</div>` : ''}
+        </div>
+        <span class="br-date">${r.date.slice(2).replace(/\./g,'/')}</span>
+      </div>`;
+    }).join("");
   }
 
   function _markReadBr(url, el) {

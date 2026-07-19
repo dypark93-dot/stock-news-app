@@ -615,82 +615,97 @@ def _fetch_naver_reports(stock_code, n=10):
     return results
 
 
-# ── 네이버 금융 업종·경제·시장 분석 리포트 (주요 뉴스 탭용) ─────────────
+# ── 네이버 금융 증권사 리포트 (종목·산업·경제·시장 분석) ─────────────────
 _REPORT_CONFIGS = [
-    ("업종분석",  "industry_list",    "industry_read"),
-    ("경제분석",  "economy_list",     "economy_read"),
-    ("시장분석",  "market_info_list", "market_info_read"),
+    ("종목분석", "company_list",    "company_read"),
+    ("산업분석", "industry_list",   "industry_read"),
+    ("경제분석", "economy_list",    "economy_read"),
+    ("시장분석", "market_info_list","market_info_read"),
 ]
-_broker_cache = {"data": None, "fetched_at": 0}
-BROKER_TTL    = 1800   # 30분
+_REPORT_CFG_MAP = {cfg[0]: cfg for cfg in _REPORT_CONFIGS}
+_broker_cache   = {}   # label → {"data": [...], "fetched_at": 0}
+BROKER_TTL      = 1800  # 30분
 
-def _fetch_general_reports(n_each=20):
+def _fetch_report_type(label, list_page, read_prefix, n=20):
     _date_re = re.compile(r'(\d{2}\.\d{2}\.\d{2})')
-    results  = []
-    for label, list_page, read_prefix in _REPORT_CONFIGS:
-        url = f"https://finance.naver.com/research/{list_page}.naver"
-        try:
-            resp = requests.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Referer":    "https://finance.naver.com/research/",
-            }, timeout=8)
-            resp.encoding = "euc-kr"
-            html = resp.text
-        except Exception:
+    url = f"https://finance.naver.com/research/{list_page}.naver"
+    try:
+        resp = requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Referer":    "https://finance.naver.com/research/",
+        }, timeout=8)
+        resp.encoding = "euc-kr"
+        html = resp.text
+    except Exception:
+        return []
+
+    link_re = re.compile(
+        rf'href="({re.escape(read_prefix)}\.naver\?nid=\d+[^"]*?)"[^>]*>(.*?)</a>',
+        re.DOTALL
+    )
+    results = []
+    count   = 0
+    for m in link_re.finditer(html):
+        if count >= n:
+            break
+        path  = m.group(1)
+        title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+        title = clean(title)
+        if not title or len(title) < 5:
             continue
 
-        link_re = re.compile(
-            rf'href="({re.escape(read_prefix)}\.naver\?nid=\d+[^"]*?)"[^>]*>(.*?)</a>',
-            re.DOTALL
-        )
-        count = 0
-        for m in link_re.finditer(html):
-            if count >= n_each:
-                break
-            path  = m.group(1)
-            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-            title = clean(title)
-            if not title or len(title) < 5:
-                continue
+        rest = html[m.end(): m.end() + 600]
+        dm   = _date_re.search(rest)
+        if not dm:
+            continue
 
-            # 링크 이후 600자에서 날짜·증권사 추출
-            rest = html[m.end(): m.end() + 600]
-            dm   = _date_re.search(rest)
-            if not dm:
-                continue
+        snippet = rest[: dm.start()]
+        firm = ""
+        for td_html in re.findall(r'<td[^>]*>\s*(.*?)\s*</td>', snippet, re.DOTALL):
+            td_txt = re.sub(r"<[^>]+>", "", td_html).strip()
+            if 2 <= len(td_txt) <= 15 and re.search(r'[가-힣]', td_txt):
+                firm = td_txt
 
-            # <td> 내용 중 2-15자 한글 포함 텍스트 → 증권사명
-            snippet = rest[: dm.start()]
-            firm = ""
-            for td_html in re.findall(r'<td[^>]*>\s*(.*?)\s*</td>', snippet, re.DOTALL):
-                td_txt = re.sub(r"<[^>]+>", "", td_html).strip()
-                if 2 <= len(td_txt) <= 15 and re.search(r'[가-힣]', td_txt):
-                    firm = td_txt
-
-            results.append({
-                "title":   title,
-                "firm":    firm,
-                "date":    "20" + dm.group(1),
-                "link":    f"https://finance.naver.com/research/{path}",
-                "type":    label,
-            })
-            count += 1
-
-    results.sort(key=lambda x: x["date"], reverse=True)
+        results.append({
+            "title": title,
+            "firm":  firm,
+            "date":  "20" + dm.group(1),
+            "link":  f"https://finance.naver.com/research/{path}",
+            "type":  label,
+        })
+        count += 1
     return results
 
 
 @app.route("/api/broker-reports")
 def api_broker_reports():
-    now = time.time()
-    if _broker_cache["data"] is None or now - _broker_cache["fetched_at"] >= BROKER_TTL:
-        try:
-            data = _fetch_general_reports(n_each=20)
-        except Exception:
-            data = []
-        _broker_cache["data"]       = data
-        _broker_cache["fetched_at"] = now
-    return jsonify(_broker_cache["data"])
+    rtype = request.args.get("type", "")
+    now   = time.time()
+
+    if rtype in _REPORT_CFG_MAP:
+        cached = _broker_cache.get(rtype, {})
+        if not cached.get("data") or now - cached.get("fetched_at", 0) >= BROKER_TTL:
+            label, list_page, read_prefix = _REPORT_CFG_MAP[rtype]
+            try:
+                data = _fetch_report_type(label, list_page, read_prefix)
+            except Exception:
+                data = []
+            _broker_cache[rtype] = {"data": data, "fetched_at": now}
+        return jsonify(_broker_cache[rtype]["data"])
+
+    # type 미지정 → 전체 반환 (하위 호환)
+    all_data = []
+    for label, list_page, read_prefix in _REPORT_CONFIGS:
+        cached = _broker_cache.get(label, {})
+        if not cached.get("data") or now - cached.get("fetched_at", 0) >= BROKER_TTL:
+            try:
+                data = _fetch_report_type(label, list_page, read_prefix)
+            except Exception:
+                data = []
+            _broker_cache[label] = {"data": data, "fetched_at": now}
+        all_data.extend(_broker_cache[label]["data"])
+    all_data.sort(key=lambda x: x["date"], reverse=True)
+    return jsonify(all_data)
 
 
 @app.route("/api/detail/<ticker>")

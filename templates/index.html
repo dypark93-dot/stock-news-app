@@ -1825,8 +1825,6 @@
         color: c.close >= c.open ? 'rgba(239,68,68,.25)' : 'rgba(59,130,246,.25)',
       })));
     }
-    mainChart.timeScale().fitContent();
-
     /* OHLC 툴팁 */
     const tip = document.createElement('div');
     tip.className = 'gmc-tooltip'; mainEl.appendChild(tip);
@@ -1881,28 +1879,34 @@
       rs.createPriceLine({ price:70, color:'#ef4444aa', lineWidth:1, lineStyle:LS.Dashed, axisLabelVisible:true });
       rs.createPriceLine({ price:30, color:'#3b82f6aa', lineWidth:1, lineStyle:LS.Dashed, axisLabelVisible:true });
     }
-    /* ── 시간축 동기화 (시간값 기반 — 인덱스 기반 시 MACD/RSI 날짜 어긋남 방지) ── */
+    /* ── 시간축 동기화 (offset 보정 방식 — 날짜 픽셀 정확 정렬) ──
+       MACD 첫 값 = candle[33] (slow+sig-2=26+9-2),  RSI 첫 값 = candle[14]
+       메인 인덱스 X → MACD 인덱스 X-33, RSI 인덱스 X-14 로 보정해야 정확히 일치 */
+    const MACD_OFF  = 33;
+    const RSI_OFF   = 14;
     const allCharts = [mainChart, macdChart, rsiChart];
+    const _offsets  = [0, MACD_OFF, RSI_OFF];
     let _sync = false;
-    allCharts.forEach(ch => {
-      ch.timeScale().subscribeVisibleTimeRangeChange(rng => {
+    allCharts.forEach((ch, idx) => {
+      ch.timeScale().subscribeVisibleLogicalRangeChange(rng => {
         if (_sync || !rng) return;
         _sync = true;
-        allCharts.forEach(o => { if (o !== ch) o.timeScale().setVisibleRange(rng); });
+        const mFrom = rng.from + _offsets[idx];
+        const mTo   = rng.to   + _offsets[idx];
+        allCharts.forEach((o, oidx) => {
+          if (o !== ch) {
+            o.timeScale().setVisibleLogicalRange({
+              from: mFrom - _offsets[oidx],
+              to:   mTo   - _offsets[oidx],
+            });
+          }
+        });
         _sync = false;
       });
     });
 
-    /* 메인 차트 기준으로 MACD·RSI 초기 범위 맞춤 */
-    requestAnimationFrame(() => {
-      const rng = mainChart.timeScale().getVisibleRange();
-      if (rng) {
-        _sync = true;
-        macdChart.timeScale().setVisibleRange(rng);
-        rsiChart.timeScale().setVisibleRange(rng);
-        _sync = false;
-      }
-    });
+    /* 구독 완료 후 fitContent → subscribeVisibleLogicalRangeChange 가 자동으로 MACD·RSI 동기화 */
+    mainChart.timeScale().fitContent();
 
     _gmcChart = { remove() { allCharts.forEach(c => c.remove()); } };
 

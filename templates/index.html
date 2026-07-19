@@ -566,10 +566,15 @@
     .gc-table td { padding:5px 7px; border-bottom:1px solid var(--border); text-align:center; }
     .gc-table td:first-child { text-align:left; }
     .gc-table tr:last-child td { border-bottom:none; }
-    .gc-name { font-weight:600; font-size:.8rem; }
-    .gc-tkr  { font-size:.62rem; color:var(--muted); margin-left:3px; }
-    .gc-link { text-decoration:none; color:inherit; }
-    .gc-link:hover .gc-name { text-decoration:underline; color:var(--amber); }
+    .gc-name { font-weight:600; font-size:.8rem; display:block; }
+    .gc-tkr  { font-size:.62rem; color:var(--muted); }
+    .gc-btns { display:flex; gap:3px; margin-top:3px; }
+    .gc-btn  {
+      font-size:.58rem; padding:1px 6px; border-radius:3px; border:1px solid var(--border);
+      cursor:pointer; background:var(--bg-2); color:var(--muted);
+      text-decoration:none; line-height:1.5; white-space:nowrap;
+    }
+    .gc-btn:hover { background:var(--blue-d); color:#fff; border-color:var(--blue-d); }
     .gc-pass { color:#34d399; font-weight:700; }
     .gc-fail { color:var(--muted); }
     .gc-prog { text-align:center; padding:18px; color:var(--muted); font-size:.85rem; }
@@ -1756,10 +1761,11 @@
   }
 
   function _updateGmcHeader(price, change, rate, sign) {
-    const cls   = sign === "2" ? "gm-up" : sign === "5" ? "gm-dn" : "gm-flat";
-    const arrow = sign === "2" ? "▲" : sign === "5" ? "▼" : "";
     const pEl = document.getElementById("gmc-price");
     const cEl = document.getElementById("gmc-chg");
+    if (!price) { pEl.textContent = ""; cEl.textContent = ""; return; }
+    const cls   = sign === "2" ? "gm-up" : sign === "5" ? "gm-dn" : "gm-flat";
+    const arrow = sign === "2" ? "▲" : sign === "5" ? "▼" : "";
     pEl.textContent = _fmtPrice(price);
     pEl.className   = "gmc-hd-price-val " + cls;
     cEl.textContent = `${_fmtChg(change)}  ${arrow}${Math.abs(rate).toFixed(2)}%`;
@@ -2284,6 +2290,23 @@
     return `<span class="${v >= thr ? 'gc-pass' : 'gc-fail'}">${v}${suffix}</span>`;
   }
 
+  function _gcNameCell(r) {
+    const sym = r.ticker + (r.market === 'KQ' ? '.KQ' : '.KS');
+    const safeName = r.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<span class="gc-name">${r.name}</span>
+      <div style="display:flex;align-items:center;gap:3px;margin-top:2px;">
+        <span class="gc-tkr">${r.ticker}</span>
+        <span class="gc-btns">
+          <a href="https://finance.naver.com/item/coinfo.naver?code=${r.ticker}" target="_blank" rel="noopener" class="gc-btn">재무제표</a>
+          <button class="gc-btn" onclick="openGcChart('${safeName}','${sym}')">차트</button>
+        </span>
+      </div>`;
+  }
+
+  function openGcChart(name, sym) {
+    openGmChart(name, sym, 0, 0, 0, '0');
+  }
+
   function renderGcTab() {
     const cont = document.getElementById('gc-content');
     if (!_gcData) return;
@@ -2304,7 +2327,7 @@
             <th>ROE(3y평균)</th><th>ROA(3y평균)</th><th>OPM(3y평균)</th>
           </tr></thead>
           <tbody>${stocks.map(r => `<tr>
-            <td><a href="https://finance.naver.com/item/coinfo.naver?code=${r.ticker}" target="_blank" rel="noopener" class="gc-link"><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></a></td>
+            <td>${_gcNameCell(r)}</td>
             <td>${_fmtThresh(r.roe,   15, '%')}</td>
             <td>${_fmtThresh(r.roa,    7, '%')}</td>
             <td>${_fmtThresh(r.opm,   10, '%')}</td>
@@ -2323,7 +2346,7 @@
             <th>OPM(3y)</th><th>ROE(3y)</th><th>ROA(3y)</th><th>이자보상</th>
           </tr></thead>
           <tbody>${stocks.map(r => `<tr>
-            <td><a href="https://finance.naver.com/item/coinfo.naver?code=${r.ticker}" target="_blank" rel="noopener" class="gc-link"><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></a></td>
+            <td>${_gcNameCell(r)}</td>
             <td>${_fmtThresh(r.rev_cagr,   10, '%')}</td>
             <td>${_fmtThresh(r.ni_cagr,    10, '%')}</td>
             <td>${_fmtThresh(r.ebitda_cagr,10, '%')}</td>

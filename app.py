@@ -1184,6 +1184,51 @@ def api_prices():
     return jsonify(get_prices())
 
 
+# ── 맞춤 뉴스 ─────────────────────────────────────────────────────
+_personal_cache = {}   # frozenset(keywords) → {data, fetched_at}
+PERSONAL_TTL    = 600  # 10분
+
+@app.route("/api/personalized")
+def api_personalized():
+    kw_raw = request.args.get("kw", "").strip()
+    if not kw_raw:
+        return jsonify({"items": [], "keywords": []})
+
+    keywords = [k.strip() for k in kw_raw.split(",") if k.strip()][:5]
+    cache_key = frozenset(keywords)
+
+    now = time.time()
+    cached = _personal_cache.get(cache_key)
+    if cached and now - cached["fetched_at"] < PERSONAL_TTL:
+        return jsonify(cached["data"])
+
+    def fetch(kw):
+        try:
+            items = naver_news(kw, n=15)
+            for item in items:
+                item["matched_kw"] = kw
+            return items
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        results = list(ex.map(fetch, keywords))
+
+    seen = set()
+    all_items = []
+    for items in results:
+        for item in items:
+            if item["link"] not in seen:
+                seen.add(item["link"])
+                all_items.append(item)
+
+    all_items.sort(key=lambda x: x.get("pubDate", ""), reverse=True)
+
+    result = {"items": all_items[:60], "keywords": keywords}
+    _personal_cache[cache_key] = {"data": result, "fetched_at": now}
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)

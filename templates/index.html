@@ -402,6 +402,34 @@
       color: var(--amber);
     }
 
+    /* ── 맞춤 뉴스 ── */
+    .pers-kw-bar {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 14px 8px; border-bottom: 1px solid var(--border);
+    }
+    .pers-kw-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(14,165,233,.1); border: 1px solid rgba(14,165,233,.28);
+      color: #38bdf8; border-radius: 20px;
+      padding: 3px 10px; font-size: .72rem; font-weight: 600;
+    }
+    .pers-kw-chip em {
+      background: rgba(14,165,233,.22); border-radius: 10px;
+      padding: 0 5px; font-style: normal; font-size: .67rem;
+    }
+    .pers-match-kw {
+      background: rgba(168,85,247,.12); color: #a855f7;
+      border-radius: 4px; padding: 1px 6px; font-size: .68rem;
+    }
+    .pers-empty {
+      padding: 40px 20px; text-align: center;
+      color: var(--muted); font-size: .84rem; line-height: 2;
+    }
+    .pers-loading {
+      padding: 24px; text-align: center;
+      color: var(--muted); font-size: .82rem;
+    }
+
     /* ── 전체 뉴스 피드 ── */
     .mf-item {
       padding: 10px 16px;
@@ -1008,11 +1036,13 @@
       <div class="market-view-bar">
         <button class="mv-btn mv-active" id="mv-cat"  onclick="switchView('cat')">카테고리별 보기</button>
         <button class="mv-btn"           id="mv-feed" onclick="switchView('feed')">시간순 전체보기</button>
+        <button class="mv-btn"           id="mv-pers" onclick="switchView('personal')">맞춤 뉴스 ✦</button>
       </div>
       <div id="market-grid">
         <div class="market-empty">로딩 중…</div>
       </div>
       <div id="market-feed" style="display:none"></div>
+      <div id="market-personalized" style="display:none"></div>
     </div>
 
     <!-- 52주 신고가 -->
@@ -1972,20 +2002,55 @@
   /* ── 뷰 전환 ── */
   function switchView(mode) {
     _marketView = mode;
-    document.getElementById("market-grid").style.display = mode === "cat"  ? "" : "none";
-    document.getElementById("market-feed").style.display = mode === "feed" ? "" : "none";
+    document.getElementById("market-grid").style.display         = mode === "cat"      ? "" : "none";
+    document.getElementById("market-feed").style.display         = mode === "feed"     ? "" : "none";
+    document.getElementById("market-personalized").style.display = mode === "personal" ? "" : "none";
     document.getElementById("mv-cat") .classList.toggle("mv-active", mode === "cat");
     document.getElementById("mv-feed").classList.toggle("mv-active", mode === "feed");
+    document.getElementById("mv-pers").classList.toggle("mv-active", mode === "personal");
     if (mode === "feed" && !_feedRendered && _marketData) {
       renderMarketFeed(_marketData);
       _feedRendered = true;
     }
+    if (mode === "personal") renderPersonalized();
   }
 
   /* ── 읽은 뉴스 (localStorage 영속 저장) ── */
   const _visitedNews = new Set(JSON.parse(localStorage.getItem('_vn') || '[]'));
 
+  /* ── 맞춤 뉴스 키워드 추적 ── */
+  const _KW_STOP = new Set([
+    '관련','대한','에서','으로','위해','통해','따른','대해','속에','지난','올해',
+    '이번','내년','오늘','내일','시장','뉴스','기자','보도','속보','단독','종합',
+    '발표','확인','진행','완료','계획','예상','전망','한국','미국','중국','일본',
+    '유럽','글로벌','국내','해외','세계','이후','이전','이날','오전','오후','현재',
+    '급등','급락','상승','하락','강세','약세','증가','감소','사상','최고','최저',
+    '추진','검토','논의','협의','회의','결정','선정','선발','출범','재편','개편',
+  ]);
+
+  let _clickedKws = JSON.parse(localStorage.getItem('_ck') || '{}');
+
+  function _recordKws(title) {
+    const clean = title.replace(/<[^>]+>/g, '').replace(/[^\w\s가-힣]/g, ' ');
+    const words = clean.split(/\s+/).map(w => w.trim())
+      .filter(w => w.length >= 2 && !_KW_STOP.has(w) && !/^\d+$/.test(w));
+    words.forEach(w => { _clickedKws[w] = (_clickedKws[w] || 0) + 1; });
+    const sorted = Object.entries(_clickedKws).sort((a, b) => b[1] - a[1]);
+    _clickedKws = Object.fromEntries(sorted.slice(0, 50));
+    try { localStorage.setItem('_ck', JSON.stringify(_clickedKws)); } catch(e) {}
+  }
+
+  function _getTopKws(n = 5) {
+    return Object.entries(_clickedKws)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([k]) => k);
+  }
+
   function _markRead(url, el) {
+    if (!_visitedNews.has(url) && el?.textContent) {
+      _recordKws(el.textContent.trim());
+    }
     if (_visitedNews.has(url)) return;
     _visitedNews.add(url);
     const arr = [..._visitedNews];
@@ -1994,10 +2059,92 @@
     if (el) {
       const li = el.closest('.ni, .market-ni, .mf-item');
       if (!li) return;
-      if (li.classList.contains('ni'))        li.classList.add('ni-read');
+      if (li.classList.contains('ni'))             li.classList.add('ni-read');
       else if (li.classList.contains('market-ni')) li.classList.add('mni-read');
-      else                                    li.classList.add('mfi-read');
+      else                                         li.classList.add('mfi-read');
     }
+  }
+
+  /* ── 맞춤 뉴스 렌더링 ── */
+  let _persAllItems = [];
+  let _persPage     = 1;
+  const _PERS_PER_PAGE = 30;
+
+  async function renderPersonalized() {
+    const el = document.getElementById("market-personalized");
+    if (!el) return;
+
+    const topKws = _getTopKws(5);
+    if (topKws.length === 0) {
+      el.innerHTML = `<div class="pers-empty">
+        아직 읽은 기사가 없습니다.<br>
+        시장 이슈 탭에서 관심 있는 기사를 클릭하면<br>
+        그 방향으로 맞춤 뉴스를 찾아드립니다.
+      </div>`;
+      return;
+    }
+
+    const kwChips = topKws.map(k =>
+      `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
+    ).join('');
+    el.innerHTML = `<div class="pers-kw-bar">${kwChips}</div>
+      <div class="pers-loading">관심 키워드로 뉴스 검색 중…</div>`;
+
+    try {
+      const resp = await fetch(`/api/personalized?kw=${encodeURIComponent(topKws.join(','))}`);
+      const data = await resp.json();
+      _persAllItems = data.items || [];
+      _persPage = 1;
+      _renderPersPage();
+    } catch(e) {
+      el.innerHTML = `<div class="pers-empty">뉴스 로딩 실패. 잠시 후 다시 시도해주세요.</div>`;
+    }
+  }
+
+  function _renderPersPage() {
+    const el = document.getElementById("market-personalized");
+    if (!el) return;
+
+    const topKws = _getTopKws(5);
+    const kwChips = topKws.map(k =>
+      `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
+    ).join('');
+    const kwBar = `<div class="pers-kw-bar">${kwChips}</div>`;
+
+    if (!_persAllItems.length) {
+      el.innerHTML = kwBar + `<div class="pers-empty">검색 결과가 없습니다.</div>`;
+      return;
+    }
+
+    const total      = _persAllItems.length;
+    const totalPages = Math.ceil(total / _PERS_PER_PAGE);
+    const start      = (_persPage - 1) * _PERS_PER_PAGE;
+    const pageItems  = _persAllItems.slice(start, start + _PERS_PER_PAGE);
+    const countHtml  = `<div class="feed-count">${total}건 · ${_persPage}/${totalPages}페이지</div>`;
+    const pgHtml     = _makePgHtml(_persPage, totalPages, 'goPersonalPage');
+
+    const items = pageItems.map(item => {
+      const read = _visitedNews.has(item.link) ? ' mfi-read' : '';
+      const src  = item.source ? `<span class="mf-source">${item.source}</span><span>·</span>` : '';
+      const date = item.pubDate ? `<span>${fmtDate(item.pubDate)}</span>` : '';
+      return `<div class="mf-item${read}">
+        <div class="mf-tags">
+          <span class="pers-match-kw">${item.matched_kw || ''}</span>
+        </div>
+        <a href="${item.link}" target="_blank" rel="noopener"
+           onclick="_markRead(this.href,this)">${item.title}</a>
+        <div class="mf-meta">${src}${date}</div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = kwBar + countHtml + pgHtml + items + pgHtml;
+  }
+
+  function goPersonalPage(page) {
+    _persPage = page;
+    _renderPersPage();
+    document.getElementById("market-personalized")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   /* ── 시간순 전체 피드 (페이지네이션) ── */

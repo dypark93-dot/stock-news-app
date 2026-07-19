@@ -2066,25 +2066,56 @@
   const _visitedNews = new Set(JSON.parse(localStorage.getItem('_vn') || '[]'));
 
   /* ── 맞춤 뉴스 키워드 추적 ── */
+  // v2: matched_kw 우선 추적 방식으로 변경 — 기존 데이터 초기화
+  if (localStorage.getItem('_ck_v') !== '2') {
+    localStorage.removeItem('_ck');
+    localStorage.setItem('_ck_v', '2');
+  }
+
   const _KW_STOP = new Set([
-    '관련','대한','에서','으로','위해','통해','따른','대해','속에','지난','올해',
-    '이번','내년','오늘','내일','시장','뉴스','기자','보도','속보','단독','종합',
-    '발표','확인','진행','완료','계획','예상','전망','한국','미국','중국','일본',
-    '유럽','글로벌','국내','해외','세계','이후','이전','이날','오전','오후','현재',
-    '급등','급락','상승','하락','강세','약세','증가','감소','사상','최고','최저',
-    '추진','검토','논의','협의','회의','결정','선정','선발','출범','재편','개편',
+    // 시간/날짜
+    '지난','올해','이번','내년','오늘','내일','이후','이전','이날','오전','오후','현재','최근','당일',
+    // 방향/조사
+    '관련','대한','에서','으로','위해','통해','따른','대해','속에','따라','인해','인한','대해서',
+    // 뉴스/미디어
+    '뉴스','기자','보도','속보','단독','종합','발표','확인','진행','완료','계획','업데이트',
+    // 범용 경제 단어 — 검색하면 전혀 다른 뉴스까지 다 나옴
+    '수출','수입','규제','실적','공급','계약','협력','투자','성장','위기','전략','효과',
+    '대응','확대','강화','기업','업계','정부','미래','변화','구조','분야','부문','시대',
+    '영향','역할','경우','상황','문제','방향','원인','결과','필요','가능','중요','중점',
+    '추진','검토','논의','협의','회의','결정','선정','출범','재편','개편','강조','제시',
+    '지원','육성','활성화','혁신','디지털','스마트','친환경','탄소','에너지',
+    // 범용 주가 용어
+    '급등','급락','상승','하락','강세','약세','증가','감소','사상','최고','최저','반등',
+    '폭등','폭락','주가','지수','시총','거래','매수','매도','외국인','기관','개인','시장',
+    // 단독 국가명 (너무 범용)
+    '한국','미국','중국','일본','유럽','글로벌','국내','해외','세계','아시아',
+    // 예상/전망
+    '예상','전망','우려','기대','전문가','분석','경고','낙관','비관','가능성',
   ]);
 
   let _clickedKws = JSON.parse(localStorage.getItem('_ck') || '{}');
 
+  function _saveKws() {
+    const sorted = Object.entries(_clickedKws).sort((a, b) => b[1] - a[1]);
+    _clickedKws = Object.fromEntries(sorted.slice(0, 50));
+    try { localStorage.setItem('_ck', JSON.stringify(_clickedKws)); } catch(e) {}
+  }
+
+  // 실제 검색 키워드 기록 (가중치 3 — 가장 정확한 신호)
+  function _recordSearchKw(kw) {
+    if (!kw || kw.length < 2) return;
+    _clickedKws[kw] = (_clickedKws[kw] || 0) + 3;
+    _saveKws();
+  }
+
+  // 제목 단어 추출 기록 (가중치 1 — 보조 신호)
   function _recordKws(title) {
     const clean = title.replace(/<[^>]+>/g, '').replace(/[^\w\s가-힣]/g, ' ');
     const words = clean.split(/\s+/).map(w => w.trim())
       .filter(w => w.length >= 2 && !_KW_STOP.has(w) && !/^\d+$/.test(w));
     words.forEach(w => { _clickedKws[w] = (_clickedKws[w] || 0) + 1; });
-    const sorted = Object.entries(_clickedKws).sort((a, b) => b[1] - a[1]);
-    _clickedKws = Object.fromEntries(sorted.slice(0, 50));
-    try { localStorage.setItem('_ck', JSON.stringify(_clickedKws)); } catch(e) {}
+    _saveKws();
   }
 
   function _getTopKws(n = 5) {
@@ -2095,8 +2126,17 @@
   }
 
   function _markRead(url, el) {
-    if (!_visitedNews.has(url) && el?.textContent) {
-      _recordKws(el.textContent.trim());
+    if (!_visitedNews.has(url)) {
+      // 기사 컨테이너의 검색 키워드 태그를 1순위로 기록 (훨씬 정확)
+      const li    = el?.closest('.ni, .market-ni, .mf-item');
+      const kwTag = li?.querySelector('.market-ni-kw, .mf-kw, .pers-match-kw');
+      const searchKw = kwTag?.textContent?.trim();
+      if (searchKw) {
+        _recordSearchKw(searchKw);
+      } else if (el?.textContent) {
+        // 검색 키워드 태그 없는 경우(일반 뉴스 탭)만 제목에서 추출
+        _recordKws(el.textContent.trim());
+      }
     }
     if (_visitedNews.has(url)) return;
     _visitedNews.add(url);

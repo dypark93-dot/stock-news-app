@@ -549,6 +549,32 @@
     .br-item.bri-read > .br-body > a { color: #a78bfa; }
     .br-item.bri-read > .br-body > a:hover { color: #c4b5fd; text-decoration: underline; }
 
+    /* ── 위대한 기업 찾기 ── */
+    .gc-tabs { display:flex; gap:6px; padding:8px 12px; border-bottom:1px solid var(--border); }
+    .gc-tab {
+      padding:4px 14px; border-radius:6px; border:1px solid var(--border2);
+      background:transparent; color:var(--muted); font-size:.74rem; font-weight:600; cursor:pointer;
+    }
+    .gc-tab.gc-active { background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.35); color:var(--amber); }
+    .gc-criteria { font-size:.68rem; color:var(--muted); padding:6px 12px 2px; }
+    .gc-wrap { overflow-x:auto; }
+    .gc-table { width:100%; border-collapse:collapse; font-size:.77rem; }
+    .gc-table th {
+      padding:5px 7px; border-bottom:1px solid var(--border);
+      color:var(--muted); font-size:.65rem; white-space:nowrap; text-align:center;
+    }
+    .gc-table td { padding:5px 7px; border-bottom:1px solid var(--border); text-align:center; }
+    .gc-table td:first-child { text-align:left; }
+    .gc-table tr:last-child td { border-bottom:none; }
+    .gc-name { font-weight:600; font-size:.8rem; }
+    .gc-tkr  { font-size:.62rem; color:var(--muted); margin-left:3px; }
+    .gc-pass { color:#34d399; font-weight:700; }
+    .gc-fail { color:var(--muted); }
+    .gc-prog { text-align:center; padding:18px; color:var(--muted); font-size:.85rem; }
+    .gc-bar  { height:4px; background:var(--border); border-radius:2px; width:200px; margin:8px auto 0; }
+    .gc-fill { height:100%; background:var(--amber); border-radius:2px; transition:width .3s; }
+    .gc-empty { text-align:center; padding:18px; color:var(--muted); font-size:.82rem; }
+
     /* ── 추가 폼 ── */
     .add-bar {
       display: flex; align-items: center; gap: 8px;
@@ -1142,6 +1168,25 @@
         </div>
         <div class="br-list" id="br-content">
           <div class="br-loading">리포트를 불러오는 중…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 위대한 기업 찾기 -->
+    <div class="kis-box">
+      <div class="kis-hd" id="great-co-hd" onclick="toggleKisBox('great-co')">
+        <span class="kis-title">🏆 위대한 기업 찾기</span>
+        <span class="kis-time" id="great-co-time"></span>
+        <button class="kis-refresh" onclick="event.stopPropagation();loadGreatCo(true)" style="margin-left:auto;margin-right:8px">새로고침</button>
+        <span class="kis-chevron" id="great-co-chev">▶</span>
+      </div>
+      <div class="kis-body" id="great-co-body" style="display:none">
+        <div class="gc-tabs">
+          <button class="gc-tab gc-active" id="gc-t1" onclick="switchGcTab('patdorsey')">팻 도시 기준</button>
+          <button class="gc-tab"           id="gc-t2" onclick="switchGcTab('dantown')">다니엘 타운 기준</button>
+        </div>
+        <div id="gc-content">
+          <div class="gc-empty">새로고침 버튼을 눌러 분석을 시작하세요.<br><small style="font-size:.7rem;color:var(--muted)">50개 종목 분석 · 약 30초 소요</small></div>
         </div>
       </div>
     </div>
@@ -2187,6 +2232,106 @@
       try { localStorage.setItem('_vn', JSON.stringify([..._visitedNews])); } catch(_) {}
     }
     el.closest('.br-item')?.classList.add('bri-read');
+  }
+
+  /* ── 위대한 기업 찾기 ── */
+  let _gcData = null, _gcTab = 'patdorsey', _gcPollTimer = null;
+
+  async function loadGreatCo(force) {
+    if (!force && _gcData) { renderGcTab(); return; }
+    _gcData = null;
+    clearTimeout(_gcPollTimer);
+    const cont = document.getElementById('gc-content');
+    cont.innerHTML = `<div class="gc-prog">분석 요청 중…<div class="gc-bar"><div class="gc-fill" style="width:0%"></div></div></div>`;
+    _gcPoll();
+  }
+
+  async function _gcPoll() {
+    try {
+      const data = await fetch('/api/great-companies').then(r => r.json());
+      const cont = document.getElementById('gc-content');
+      if (data.status === 'loading') {
+        const pct = data.total > 0 ? Math.round(data.progress / data.total * 100) : 0;
+        cont.innerHTML = `<div class="gc-prog">분석 중… ${data.progress}/${data.total}종목 (${pct}%)<div class="gc-bar"><div class="gc-fill" style="width:${pct}%"></div></div></div>`;
+        _gcPollTimer = setTimeout(_gcPoll, 2500);
+      } else if (data.status === 'done') {
+        _gcData = data;
+        document.getElementById('great-co-time').textContent =
+          new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+        renderGcTab();
+      } else {
+        cont.innerHTML = `<div class="gc-empty">오류가 발생했습니다.</div>`;
+      }
+    } catch(e) {
+      document.getElementById('gc-content').innerHTML = `<div class="gc-empty">통신 오류가 발생했습니다.</div>`;
+    }
+  }
+
+  function switchGcTab(tab) {
+    _gcTab = tab;
+    document.getElementById('gc-t1').classList.toggle('gc-active', tab === 'patdorsey');
+    document.getElementById('gc-t2').classList.toggle('gc-active', tab === 'dantown');
+    renderGcTab();
+  }
+
+  function _fmt(v, suffix) {
+    return v != null ? `<span class="${v >= 0 ? 'gc-pass' : 'gc-fail'}">${v > 0 ? '+' : ''}${v}${suffix}</span>` : '<span class="gc-fail">-</span>';
+  }
+  function _fmtThresh(v, thr, suffix) {
+    if (v == null) return '<span class="gc-fail">-</span>';
+    return `<span class="${v >= thr ? 'gc-pass' : 'gc-fail'}">${v}${suffix}</span>`;
+  }
+
+  function renderGcTab() {
+    const cont = document.getElementById('gc-content');
+    if (!_gcData) return;
+    const stocks = _gcData[_gcTab] || [];
+
+    if (!stocks.length) {
+      cont.innerHTML = `<div class="gc-empty">현재 기준을 충족하는 종목이 없습니다.<br><small style="font-size:.7rem;color:var(--muted)">데이터가 없는 종목은 제외됩니다.</small></div>`;
+      return;
+    }
+
+    if (_gcTab === 'patdorsey') {
+      cont.innerHTML = `
+        <div class="gc-criteria">기준: ROE≥15% · ROA≥7% · 영업이익률≥10% (최근결산 또는 3년평균 충족)</div>
+        <div class="gc-wrap"><table class="gc-table">
+          <thead><tr>
+            <th>종목명</th>
+            <th>ROE</th><th>ROA</th><th>영업이익률</th>
+            <th>ROE(3y평균)</th><th>ROA(3y평균)</th><th>OPM(3y평균)</th>
+          </tr></thead>
+          <tbody>${stocks.map(r => `<tr>
+            <td><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></td>
+            <td>${_fmtThresh(r.roe,   15, '%')}</td>
+            <td>${_fmtThresh(r.roa,    7, '%')}</td>
+            <td>${_fmtThresh(r.opm,   10, '%')}</td>
+            <td>${_fmtThresh(r.roe_3y,15, '%')}</td>
+            <td>${_fmtThresh(r.roa_3y, 7, '%')}</td>
+            <td>${_fmtThresh(r.opm_3y,10, '%')}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    } else {
+      cont.innerHTML = `
+        <div class="gc-criteria">기준: 매출·순익·영업익·EBITDA 성장 10%↑ · OPM≥10% · ROE≥15% · ROA≥7% · 이자보상≥2x</div>
+        <div class="gc-wrap"><table class="gc-table">
+          <thead><tr>
+            <th>종목명</th>
+            <th>매출성장(3y)</th><th>순익성장(3y)</th><th>EBITDA(3y)</th>
+            <th>OPM(3y)</th><th>ROE(3y)</th><th>ROA(3y)</th><th>이자보상</th>
+          </tr></thead>
+          <tbody>${stocks.map(r => `<tr>
+            <td><span class="gc-name">${r.name}</span><span class="gc-tkr">${r.ticker}</span></td>
+            <td>${_fmtThresh(r.rev_cagr,   10, '%')}</td>
+            <td>${_fmtThresh(r.ni_cagr,    10, '%')}</td>
+            <td>${_fmtThresh(r.ebitda_cagr,10, '%')}</td>
+            <td>${_fmtThresh(r.opm_3y,     10, '%')}</td>
+            <td>${_fmtThresh(r.roe_3y,     15, '%')}</td>
+            <td>${_fmtThresh(r.roa_3y,      7, '%')}</td>
+            <td>${_fmtThresh(r.int_cov,     2, 'x')}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    }
   }
 
   /* ── 읽은 뉴스 (localStorage 영속 저장) ── */

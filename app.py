@@ -9,6 +9,7 @@ import zipfile
 import requests
 import feedparser
 import yfinance as yf
+import anthropic
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, quote
@@ -38,6 +39,7 @@ KIS_APP_KEY    = os.getenv("KIS_APP_KEY")
 KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
 KIS_BASE       = "https://openapi.koreainvestment.com:9443"  # 실전투자
 DART_KEY       = os.getenv("DART_API_KEY", "")
+ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
 
 # 해외 종목 한글 검색 키워드
 _US_KR_KEYWORDS = {          # Naver 뉴스 검색용
@@ -1227,6 +1229,82 @@ def api_personalized():
     result = {"items": all_items[:60], "keywords": keywords}
     _personal_cache[cache_key] = {"data": result, "fetched_at": now}
     return jsonify(result)
+
+
+# ── 맞춤 뉴스 수혜 종목 분석 (Claude API) ────────────────────────
+_benefit_cache = {}   # hash(titles) → {data, fetched_at}
+BENEFIT_TTL    = 1800  # 30분
+
+_BENEFIT_PROMPT = """당신은 한국 주식 시장 전문 애널리스트입니다.
+아래는 투자자가 최근 관심 있게 읽은 경제·주식 뉴스 제목 목록입니다.
+
+뉴스 제목:
+{titles}
+
+이 뉴스들을 분석해서 수혜를 받을 가능성이 높은 종목을 추천해주세요.
+반드시 아래 JSON 형식으로만 응답하고, JSON 외 텍스트는 절대 포함하지 마세요.
+
+{{
+  "themes": [
+    {{
+      "theme": "테마명 (예: AI 반도체, 방산, 2차전지)",
+      "reason": "이 테마가 주목받는 이유 1~2문장",
+      "stocks": [
+        {{
+          "name": "종목명",
+          "ticker": "티커 또는 종목코드 (모르면 빈 문자열)",
+          "market": "KR 또는 US",
+          "reason": "수혜 이유 1문장"
+        }}
+      ]
+    }}
+  ],
+  "summary": "전체 시장 흐름 요약 2~3문장",
+  "caution": "투자 시 주의사항 1문장"
+}}"""
+
+
+@app.route("/api/analyze-benefits", methods=["POST"])
+def api_analyze_benefits():
+    if not ANTHROPIC_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY가 설정되지 않았습니다."}), 500
+
+    data   = request.get_json(silent=True) or {}
+    titles = data.get("titles", [])
+    if not titles:
+        return jsonify({"error": "뉴스 제목이 없습니다."}), 400
+
+    titles = titles[:40]  # 최대 40개
+    cache_key = hash(tuple(titles))
+    now = time.time()
+    cached = _benefit_cache.get(cache_key)
+    if cached and now - cached["fetched_at"] < BENEFIT_TTL:
+        return jsonify(cached["data"])
+
+    titles_text = "\n".join(f"- {t}" for t in titles)
+    prompt = _BENEFIT_PROMPT.format(titles=titles_text)
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        # JSON만 추출
+        m = re.search(r'\{[\s\S]*\}', raw)
+        if not m:
+            return jsonify({"error": "분석 결과 파싱 실패"}), 500
+        result = json.loads(m.group())
+        _benefit_cache[cache_key] = {"data": result, "fetched_at": now}
+        return jsonify(result)
+    except json.JSONDecodeError:
+        return jsonify({"error": "JSON 파싱 오류"}), 500
+    except anthropic.AuthenticationError:
+        return jsonify({"error": "API 키가 올바르지 않습니다."}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

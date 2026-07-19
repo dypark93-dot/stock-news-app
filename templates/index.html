@@ -429,6 +429,53 @@
       padding: 24px; text-align: center;
       color: var(--muted); font-size: .82rem;
     }
+    /* ── 수혜 종목 분석 ── */
+    .benefit-btn {
+      display: block; width: calc(100% - 28px); margin: 10px 14px;
+      padding: 9px 0; border-radius: 8px; cursor: pointer; font-size: .8rem;
+      font-weight: 700; border: 1px solid rgba(251,191,36,.35);
+      background: rgba(251,191,36,.08); color: #fbbf24;
+      transition: background .15s;
+    }
+    .benefit-btn:hover { background: rgba(251,191,36,.16); }
+    .benefit-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .benefit-panel { padding: 12px 14px 4px; }
+    .benefit-summary {
+      font-size: .8rem; color: var(--muted); line-height: 1.7;
+      padding: 8px 12px; border-left: 3px solid #fbbf24;
+      margin-bottom: 12px; background: rgba(251,191,36,.05);
+      border-radius: 0 6px 6px 0;
+    }
+    .benefit-caution {
+      font-size: .73rem; color: #f87171; padding: 6px 10px;
+      border-radius: 6px; background: rgba(248,113,113,.08);
+      margin-bottom: 14px;
+    }
+    .benefit-theme { margin-bottom: 14px; }
+    .benefit-theme-hd {
+      font-size: .78rem; font-weight: 700; color: var(--text);
+      margin-bottom: 4px;
+    }
+    .benefit-theme-reason {
+      font-size: .73rem; color: var(--muted); margin-bottom: 8px; line-height: 1.6;
+    }
+    .benefit-stock {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 10px; border-radius: 7px;
+      background: var(--card2); margin-bottom: 5px;
+    }
+    .benefit-stock-name {
+      font-size: .78rem; font-weight: 700; color: var(--text);
+      white-space: nowrap;
+    }
+    .benefit-stock-ticker {
+      font-size: .68rem; color: var(--muted);
+      background: var(--border); border-radius: 4px; padding: 1px 5px;
+      white-space: nowrap;
+    }
+    .benefit-stock-reason { font-size: .73rem; color: var(--muted); line-height: 1.5; }
+    .benefit-market-kr { color: #ef4444; font-size: .65rem; font-weight: 700; }
+    .benefit-market-us { color: #3b82f6; font-size: .65rem; font-weight: 700; }
 
     /* ── 전체 뉴스 피드 ── */
     .mf-item {
@@ -2066,9 +2113,11 @@
   }
 
   /* ── 맞춤 뉴스 렌더링 ── */
-  let _persAllItems = [];
-  let _persPage     = 1;
+  let _persAllItems  = [];
+  let _persPage      = 1;
   const _PERS_PER_PAGE = 30;
+  let _benefitResult  = null;
+  let _benefitLoading = false;
 
   async function renderPersonalized() {
     const el = document.getElementById("market-personalized");
@@ -2093,8 +2142,9 @@
     try {
       const resp = await fetch(`/api/personalized?kw=${encodeURIComponent(topKws.join(','))}`);
       const data = await resp.json();
-      _persAllItems = data.items || [];
-      _persPage = 1;
+      _persAllItems  = data.items || [];
+      _persPage      = 1;
+      _benefitResult = null;   // 새 키워드셋이면 이전 분석 초기화
       _renderPersPage();
     } catch(e) {
       el.innerHTML = `<div class="pers-empty">뉴스 로딩 실패. 잠시 후 다시 시도해주세요.</div>`;
@@ -2105,7 +2155,7 @@
     const el = document.getElementById("market-personalized");
     if (!el) return;
 
-    const topKws = _getTopKws(5);
+    const topKws  = _getTopKws(5);
     const kwChips = topKws.map(k =>
       `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
     ).join('');
@@ -2115,6 +2165,13 @@
       el.innerHTML = kwBar + `<div class="pers-empty">검색 결과가 없습니다.</div>`;
       return;
     }
+
+    const btnLabel = _benefitLoading
+      ? '⏳ AI 분석 중…'
+      : (_benefitResult ? '🔄 수혜 종목 재분석' : '🔍 AI 수혜 종목 분석');
+    const benefitBtn = `<button class="benefit-btn" id="benefit-btn"
+      onclick="fetchBenefits()" ${_benefitLoading ? 'disabled' : ''}>${btnLabel}</button>`;
+    const benefitPanel = _benefitResult ? _renderBenefitHtml(_benefitResult) : '';
 
     const total      = _persAllItems.length;
     const totalPages = Math.ceil(total / _PERS_PER_PAGE);
@@ -2137,7 +2194,64 @@
       </div>`;
     }).join('');
 
-    el.innerHTML = kwBar + countHtml + pgHtml + items + pgHtml;
+    el.innerHTML = kwBar + benefitBtn + benefitPanel + countHtml + pgHtml + items + pgHtml;
+  }
+
+  async function fetchBenefits() {
+    if (_benefitLoading || !_persAllItems.length) return;
+    _benefitLoading = true;
+    _benefitResult  = null;
+    _renderPersPage();
+
+    try {
+      const titles = _persAllItems.slice(0, 40).map(i => i.title);
+      const resp   = await fetch('/api/analyze-benefits', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ titles }),
+      });
+      const data = await resp.json();
+      _benefitResult = data.error ? { error: data.error } : data;
+    } catch(e) {
+      _benefitResult = { error: '네트워크 오류가 발생했습니다.' };
+    }
+    _benefitLoading = false;
+    _renderPersPage();
+  }
+
+  function _renderBenefitHtml(result) {
+    if (result.error) {
+      return `<div class="benefit-panel"><div class="pers-empty" style="padding:12px">⚠️ ${result.error}</div></div>`;
+    }
+    const summary = result.summary
+      ? `<div class="benefit-summary">${result.summary}</div>` : '';
+    const caution = result.caution
+      ? `<div class="benefit-caution">⚠️ ${result.caution}</div>` : '';
+
+    const themes = (result.themes || []).map(t => {
+      const stocks = (t.stocks || []).map(s => {
+        const badge = s.market === 'KR'
+          ? `<span class="benefit-market-kr">KR</span>`
+          : `<span class="benefit-market-us">US</span>`;
+        const ticker = s.ticker
+          ? `<span class="benefit-stock-ticker">${s.ticker}</span>` : '';
+        return `<div class="benefit-stock">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:3px">
+              ${badge}<span class="benefit-stock-name">${s.name}</span>${ticker}
+            </div>
+            <div class="benefit-stock-reason">${s.reason}</div>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="benefit-theme">
+        <div class="benefit-theme-hd">📌 ${t.theme}</div>
+        <div class="benefit-theme-reason">${t.reason}</div>
+        ${stocks}
+      </div>`;
+    }).join('');
+
+    return `<div class="benefit-panel">${summary}${caution}${themes}</div>`;
   }
 
   function goPersonalPage(page) {

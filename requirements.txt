@@ -5,3 +5,4 @@ requests==2.34.2
 feedparser==6.0.12
 yfinance==1.5.1
 python-dotenv==1.2.2
+anthropic>=0.117.0

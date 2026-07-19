@@ -507,6 +507,35 @@
     }
     .mf-source { font-weight: 600; }
 
+    /* ── 증권사 리포트 탭 ── */
+    .br-item {
+      display: flex; align-items: flex-start; gap: .45rem;
+      padding: .42rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .82rem;
+    }
+    .br-item:last-child { border-bottom: none; }
+    .br-type {
+      flex-shrink: 0; margin-top: .1rem;
+      font-size: .6rem; font-weight: 700;
+      padding: .1rem .32rem; border-radius: 3px;
+      background: rgba(99,102,241,.15); color: #818cf8;
+      white-space: nowrap;
+    }
+    .br-type.br-economy  { background: rgba(16,185,129,.12); color: #34d399; }
+    .br-type.br-market   { background: rgba(245,158,11,.12);  color: #fbbf24; }
+    .br-body { flex: 1; min-width: 0; }
+    .br-body a {
+      color: var(--link); text-decoration: none;
+      line-height: 1.45; display: block;
+    }
+    .br-body a:hover { color: var(--link-h); text-decoration: underline; }
+    .br-meta { font-size: .63rem; color: var(--muted); margin-top: .12rem; }
+    .br-date { flex-shrink: 0; font-size: .63rem; color: var(--muted); white-space: nowrap; padding-top: .1rem; }
+    .br-loading, .br-empty { text-align: center; padding: 2rem; color: var(--muted); font-size: .85rem; }
+    .br-item.bri-read > .br-body > a { color: #a78bfa; }
+    .br-item.bri-read > .br-body > a:hover { color: #c4b5fd; text-decoration: underline; }
+
     /* ── 추가 폼 ── */
     .add-bar {
       display: flex; align-items: center; gap: 8px;
@@ -1081,15 +1110,17 @@
         </div>
       </div>
       <div class="market-view-bar">
-        <button class="mv-btn mv-active" id="mv-cat"  onclick="switchView('cat')">카테고리별 보기</button>
-        <button class="mv-btn"           id="mv-feed" onclick="switchView('feed')">시간순 전체보기</button>
-        <button class="mv-btn"           id="mv-pers" onclick="switchView('personal')">맞춤 뉴스 ✦</button>
+        <button class="mv-btn mv-active" id="mv-cat"    onclick="switchView('cat')">카테고리별 보기</button>
+        <button class="mv-btn"           id="mv-feed"   onclick="switchView('feed')">시간순 전체보기</button>
+        <button class="mv-btn"           id="mv-pers"   onclick="switchView('personal')">맞춤 뉴스 ✦</button>
+        <button class="mv-btn"           id="mv-broker" onclick="switchView('broker')">증권사 리포트 📋</button>
       </div>
       <div id="market-grid">
         <div class="market-empty">로딩 중…</div>
       </div>
-      <div id="market-feed" style="display:none"></div>
+      <div id="market-feed"       style="display:none"></div>
       <div id="market-personalized" style="display:none"></div>
+      <div id="market-broker"     style="display:none"></div>
     </div>
 
     <!-- 52주 신고가 -->
@@ -2061,17 +2092,62 @@
   /* ── 뷰 전환 ── */
   function switchView(mode) {
     _marketView = mode;
-    document.getElementById("market-grid").style.display         = mode === "cat"      ? "" : "none";
-    document.getElementById("market-feed").style.display         = mode === "feed"     ? "" : "none";
+    document.getElementById("market-grid")        .style.display = mode === "cat"      ? "" : "none";
+    document.getElementById("market-feed")        .style.display = mode === "feed"     ? "" : "none";
     document.getElementById("market-personalized").style.display = mode === "personal" ? "" : "none";
-    document.getElementById("mv-cat") .classList.toggle("mv-active", mode === "cat");
-    document.getElementById("mv-feed").classList.toggle("mv-active", mode === "feed");
-    document.getElementById("mv-pers").classList.toggle("mv-active", mode === "personal");
+    document.getElementById("market-broker")      .style.display = mode === "broker"   ? "" : "none";
+    document.getElementById("mv-cat")   .classList.toggle("mv-active", mode === "cat");
+    document.getElementById("mv-feed")  .classList.toggle("mv-active", mode === "feed");
+    document.getElementById("mv-pers")  .classList.toggle("mv-active", mode === "personal");
+    document.getElementById("mv-broker").classList.toggle("mv-active", mode === "broker");
     if (mode === "feed" && !_feedRendered && _marketData) {
       renderMarketFeed(_marketData);
       _feedRendered = true;
     }
     if (mode === "personal") renderPersonalized();
+    if (mode === "broker")   renderBrokerReports();
+  }
+
+  /* ── 증권사 리포트 렌더 ── */
+  let _brokerRendered = false;
+  async function renderBrokerReports() {
+    const el = document.getElementById("market-broker");
+    if (_brokerRendered) return;
+    el.innerHTML = `<div class="br-loading">증권사 리포트 불러오는 중…</div>`;
+    try {
+      const resp = await fetch("/api/broker-reports");
+      const data = await resp.json();
+      if (!data.length) {
+        el.innerHTML = `<div class="br-empty">리포트를 불러오지 못했습니다.</div>`;
+        return;
+      }
+      const typeClass = { "업종분석": "", "경제분석": " br-economy", "시장분석": " br-market" };
+      el.innerHTML = data.map(r => {
+        const read  = _visitedNews.has(r.link) ? ' bri-read' : '';
+        const tCls  = typeClass[r.type] || '';
+        const firm  = r.firm ? `<span>${r.firm}</span>` : '';
+        return `<div class="br-item${read}">
+          <span class="br-type${tCls}">${r.type}</span>
+          <div class="br-body">
+            <a href="${r.link}" target="_blank" rel="noopener"
+               onclick="_markReadBr(this.href,this)">${r.title}</a>
+            ${firm ? `<div class="br-meta">${firm}</div>` : ''}
+          </div>
+          <span class="br-date">${r.date.slice(2).replace(/\./g,'/')}</span>
+        </div>`;
+      }).join("");
+      _brokerRendered = true;
+    } catch(e) {
+      el.innerHTML = `<div class="br-empty">오류가 발생했습니다.</div>`;
+    }
+  }
+
+  function _markReadBr(url, el) {
+    if (!_visitedNews.has(url)) {
+      _visitedNews.add(url);
+      try { localStorage.setItem('_vn', JSON.stringify([..._visitedNews])); } catch(_) {}
+    }
+    el.closest('.br-item')?.classList.add('bri-read');
   }
 
   /* ── 읽은 뉴스 (localStorage 영속 저장) ── */

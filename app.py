@@ -575,10 +575,11 @@ def _fetch_dart_disclosures(corp_code, days=180):
             continue
         rcept_no = item.get("rcept_no", "")
         results.append({
-            "badge": badge,
-            "title": item.get("report_nm", ""),
-            "date":  item.get("rcept_dt", ""),
-            "link":  f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}",
+            "badge":      badge,
+            "title":      item.get("report_nm", ""),
+            "submitter":  item.get("flr_nm", ""),
+            "date":       item.get("rcept_dt", ""),
+            "link":       f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}",
         })
     return results
 

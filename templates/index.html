@@ -972,6 +972,9 @@
     .det-link { color: var(--link); text-decoration: none; font-size: .8rem; line-height: 1.45; }
     .det-link:hover { color: var(--link-h); text-decoration: underline; }
     .det-date   { font-size: .65rem; color: var(--muted); }
+    .det-disc-meta { display:flex; align-items:center; gap:8px; }
+    .det-disc-sub  { font-size:.65rem; color:var(--text); font-weight:500; }
+    .det-disc-sub::before { content:"제출: "; color:var(--muted); font-weight:400; }
     .det-empty  { padding: 18px 0; font-size: .78rem; color: var(--muted); text-align: center; }
     .det-spin-wrap { display: flex; justify-content: center; padding: 20px 0; }
     /* ── 글로벌 시장 차트 모달 ── */
@@ -3172,7 +3175,10 @@
           <div class="det-disc-item">
             <div><span class="det-badge ${_BADGE_CLS[d.badge] || ""}">${esc(d.badge)}</span></div>
             <a class="det-link" href="${safeHref(d.link)}" target="_blank" rel="noopener">${esc(d.title)}</a>
-            <span class="det-date">${fmtDartDate(d.date)}</span>
+            <div class="det-disc-meta">
+              ${d.submitter ? `<span class="det-disc-sub">${esc(d.submitter)}</span>` : ""}
+              <span class="det-date">${fmtDartDate(d.date)}</span>
+            </div>
           </div>`).join("")
       : '<div class="det-empty">최근 180일 내 해당 공시 없음</div>';
 

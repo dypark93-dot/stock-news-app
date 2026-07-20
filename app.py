@@ -1556,6 +1556,54 @@ def api_news():
     return jsonify(get_news(force=request.args.get("force") == "1"))
 
 
+@app.route("/api/stock-news")
+def api_stock_news():
+    """종목별 뉴스 페이지네이션 (네이버 뉴스 API, KR 전용)"""
+    name = request.args.get("name", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except (ValueError, TypeError):
+        page = 1
+
+    if not name:
+        return jsonify({"error": "name 파라미터 필요"}), 400
+
+    PER_PAGE = 5
+    start    = (page - 1) * PER_PAGE + 1
+    if start > 1000:
+        return jsonify({"items": [], "page": page, "total": 1000,
+                        "totalPages": 200})
+
+    try:
+        resp = requests.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            headers={"X-Naver-Client-Id": NAVER_ID,
+                     "X-Naver-Client-Secret": NAVER_SECRET},
+            params={"query": name, "display": PER_PAGE,
+                    "start": start, "sort": "date"},
+            timeout=6,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    total      = min(data.get("total", 0), 1000)
+    total_pgs  = math.ceil(total / PER_PAGE) if total else 1
+    items = [
+        {
+            "title":   clean(i["title"]),
+            "link":    i["link"],
+            "pubDate": i.get("pubDate", ""),
+            "source":  _domain_to_press(
+                i.get("originallink") or i.get("link", "")),
+        }
+        for i in data.get("items", [])
+    ]
+    return jsonify({"items": items, "page": page,
+                    "total": total, "totalPages": total_pgs})
+
+
 @app.route("/api/prices")
 def api_prices():
     return jsonify(get_prices())

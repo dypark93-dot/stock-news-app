@@ -1047,6 +1047,18 @@
     .gm-row-clickable { cursor: pointer; }
     .gm-row-clickable:hover { background: rgba(14,165,233,.07); }
     /* ── 읽은 뉴스 ── */
+    /* ── 종목별 뉴스 페이지네이션 ── */
+    .news-pg { display:flex; align-items:center; gap:3px; padding:6px 12px 8px; flex-wrap:wrap; }
+    .npg-btn {
+      min-width:22px; height:22px; border-radius:4px; border:1px solid var(--border);
+      background:var(--bg-2); color:var(--muted); font-size:.68rem; cursor:pointer;
+      padding:0 5px; display:inline-flex; align-items:center; justify-content:center;
+      line-height:1;
+    }
+    .npg-btn.cur  { background:var(--blue-d); color:#fff; border-color:var(--blue-d); font-weight:700; cursor:default; }
+    .npg-btn:hover:not(.cur) { background:var(--blue-d); color:#fff; border-color:var(--blue-d); }
+    .npg-dots { font-size:.68rem; color:var(--muted); padding:0 1px; line-height:22px; }
+
     .ni.ni-read > a,
     .market-ni.mni-read > a,
     .mf-item.mfi-read > a      { color: #a78bfa; }
@@ -2870,6 +2882,70 @@
     document.getElementById("market-feed")?.scrollIntoView({behavior: "smooth", block: "start"});
   }
 
+  /* ── 종목별 뉴스 페이지네이션 ── */
+  function _initPgBar(safeName, tid) {
+    // 초기 렌더 시: 1페이지 고정, 다음 버튼만 표시 (totalPages 모름)
+    return `<button class="npg-btn cur">1</button>`
+         + `<button class="npg-btn" onclick="loadStockNews('${safeName}','${tid}',2)">2</button>`
+         + `<button class="npg-btn" onclick="loadStockNews('${safeName}','${tid}',2)">▶</button>`;
+  }
+
+  function _newsPageHtml(name, tid, cur, total) {
+    const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const b = (p, lbl, active) => active
+      ? `<button class="npg-btn cur">${lbl}</button>`
+      : `<button class="npg-btn" onclick="loadStockNews('${safe}','${tid}',${p})">${lbl}</button>`;
+
+    // 표시할 페이지 번호 집합 (앞 2, 뒤 2, 현재 ±2)
+    const show = new Set();
+    [1, 2].forEach(p => { if (p <= total) show.add(p); });
+    [total - 1, total].forEach(p => { if (p >= 1) show.add(p); });
+    [-2,-1,0,1,2].forEach(d => { const p = cur+d; if (p>=1 && p<=total) show.add(p); });
+
+    const sorted = [...show].sort((a,b)=>a-b);
+    let html = '', prev = 0;
+    for (const p of sorted) {
+      if (p - prev > 1) html += `<span class="npg-dots">…</span>`;
+      html += b(p, p, p === cur);
+      prev = p;
+    }
+
+    const prev_ = cur > 1
+      ? `<button class="npg-btn" onclick="loadStockNews('${safe}','${tid}',${cur-1})">◀</button>` : '';
+    const next_ = cur < total
+      ? `<button class="npg-btn" onclick="loadStockNews('${safe}','${tid}',${cur+1})">▶</button>` : '';
+    return prev_ + html + next_;
+  }
+
+  async function loadStockNews(name, tid, page) {
+    const listEl = document.getElementById(`snews-${tid}`);
+    const pgEl   = document.getElementById(`snewspg-${tid}`);
+    if (!listEl) return;
+
+    listEl.innerHTML = '<li class="no-news" style="padding:14px">로딩 중…</li>';
+    try {
+      const r = await fetch(`/api/stock-news?name=${encodeURIComponent(name)}&page=${page}`);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+
+      listEl.innerHTML = d.items.length
+        ? d.items.map(n => {
+            const meta = [n.source, n.pubDate ? fmtDate(n.pubDate) : ''].filter(Boolean).join(' · ');
+            const read  = _visitedNews.has(n.link) ? ' ni-read' : '';
+            return `<li class="ni${read}">
+              <a href="${n.link}" target="_blank" rel="noopener"
+                 onclick="_markRead(this.href,this)">${n.title}</a>
+              ${meta ? `<span class="ni-date">${meta}</span>` : ''}
+            </li>`;
+          }).join('')
+        : '<li class="no-news">관련 뉴스 없음</li>';
+
+      if (pgEl) pgEl.innerHTML = _newsPageHtml(name, tid, d.page, d.totalPages);
+    } catch(e) {
+      listEl.innerHTML = `<li class="no-news">뉴스를 불러오지 못했습니다.</li>`;
+    }
+  }
+
   /* ── 뉴스 아이템 HTML 빌더 ── */
   function _niHtml(news, noMsg) {
     if (!news || !news.length) return `<li class="no-news">${noMsg}</li>`;
@@ -2897,13 +2973,18 @@
 
       let newsSection;
       if (showSym && s.kr_news !== undefined) {
+        // 미국 종목: 페이지네이션 없이 기존 방식 유지
         const krBlock = s.kr_news.length
           ? `<div class="kr-news-hd">한글 뉴스</div>
              <ul class="news-list">${_niHtml(s.kr_news, "관련 한글 뉴스 없음")}</ul>`
           : "";
         newsSection = `<ul class="news-list">${_niHtml(s.news, "관련 뉴스 없음")}</ul>${krBlock}`;
       } else {
-        newsSection = `<ul class="news-list">${_niHtml(s.news, "관련 뉴스 없음")}</ul>`;
+        // 한국 종목: 페이지네이션 지원
+        const safeN = s.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        newsSection = `
+          <ul class="news-list" id="snews-${tid}">${_niHtml(s.news, "관련 뉴스 없음")}</ul>
+          <div class="news-pg" id="snewspg-${tid}">${_initPgBar(safeN, tid)}</div>`;
       }
 
       const naverLinks = (!showSym && s.code) ? `

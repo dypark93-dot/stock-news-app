@@ -638,7 +638,7 @@ _broker_cache   = {}   # label → {"data": [...], "fetched_at": 0}
 BROKER_TTL      = 1800  # 30분
 
 def _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids):
-    """단일 페이지 파싱 — seen_nids 로 중복 제거"""
+    """네이버 리포트 한 페이지 파싱 → (items, total_pages)"""
     _date_re = re.compile(r'(\d{2}\.\d{2}\.\d{2})')
     params = {"page": page_num} if page_num > 1 else {}
     url    = f"https://finance.naver.com/research/{list_page}.naver"
@@ -650,7 +650,12 @@ def _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids):
         resp.encoding = "euc-kr"
         html = resp.text
     except Exception:
-        return []
+        return [], page_num
+
+    # 총 페이지 수: 페이지네이션 링크에서 최대값
+    pg_re      = re.compile(rf'{re.escape(list_page)}\.naver[^"]*[?&]page=(\d+)')
+    pg_nums    = [int(m.group(1)) for m in pg_re.finditer(html)]
+    total_pages = max(pg_nums) if pg_nums else page_num
 
     link_re = re.compile(
         rf'href="({re.escape(read_prefix)}\.naver\?nid=(\d+)[^"]*?)"[^>]*>(.*?)</a>',
@@ -658,7 +663,7 @@ def _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids):
     )
     items = []
     for m in link_re.finditer(html):
-        nid   = m.group(2)
+        nid = m.group(2)
         if nid in seen_nids:
             continue
         seen_nids.add(nid)
@@ -699,49 +704,35 @@ def _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids):
             "link":       f"https://finance.naver.com/research/{path}",
             "type":       label,
         })
-    return items
-
-
-def _fetch_report_type(label, list_page, read_prefix, max_pages=5):
-    seen_nids = set()
-    results   = []
-    for page_num in range(1, max_pages + 1):
-        items = _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids)
-        if not items:
-            break
-        results.extend(items)
-    return results
+    return items, total_pages
 
 
 @app.route("/api/broker-reports")
 def api_broker_reports():
-    rtype = request.args.get("type", "")
+    rtype = request.args.get("type", "종목분석")
+    page  = max(1, int(request.args.get("page", 1) or 1))
     now   = time.time()
 
-    if rtype in _REPORT_CFG_MAP:
-        cached = _broker_cache.get(rtype, {})
-        if not cached.get("data") or now - cached.get("fetched_at", 0) >= BROKER_TTL:
-            label, list_page, read_prefix = _REPORT_CFG_MAP[rtype]
-            try:
-                data = _fetch_report_type(label, list_page, read_prefix)
-            except Exception:
-                data = []
-            _broker_cache[rtype] = {"data": data, "fetched_at": now}
-        return jsonify(_broker_cache[rtype]["data"])
+    if rtype not in _REPORT_CFG_MAP:
+        return jsonify({"error": "unknown type"}), 400
 
-    # type 미지정 → 전체 반환 (하위 호환)
-    all_data = []
-    for label, list_page, read_prefix in _REPORT_CONFIGS:
-        cached = _broker_cache.get(label, {})
-        if not cached.get("data") or now - cached.get("fetched_at", 0) >= BROKER_TTL:
-            try:
-                data = _fetch_report_type(label, list_page, read_prefix)
-            except Exception:
-                data = []
-            _broker_cache[label] = {"data": data, "fetched_at": now}
-        all_data.extend(_broker_cache[label]["data"])
-    all_data.sort(key=lambda x: x["date"], reverse=True)
-    return jsonify(all_data)
+    cache_key = f"{rtype}|{page}"
+    cached    = _broker_cache.get(cache_key, {})
+    if not cached.get("data") or now - cached.get("fetched_at", 0) >= BROKER_TTL:
+        label, list_page, read_prefix = _REPORT_CFG_MAP[rtype]
+        try:
+            items, total_pages = _fetch_report_page(
+                label, list_page, read_prefix, page, set())
+        except Exception:
+            items, total_pages = [], 1
+        _broker_cache[cache_key] = {
+            "data":        items,
+            "total_pages": total_pages,
+            "fetched_at":  now,
+        }
+
+    c = _broker_cache[cache_key]
+    return jsonify({"items": c["data"], "total_pages": c["total_pages"], "page": page})
 
 
 # ── 위대한 기업 찾기 (팻 도시 / 다니엘 타운 기준) ─────────────────────────

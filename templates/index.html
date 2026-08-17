@@ -555,6 +555,26 @@
     .br-item.bri-read > .br-body > a { color: #a78bfa; }
     .br-item.bri-read > .br-body > a:hover { color: #c4b5fd; text-decoration: underline; }
 
+    /* ── 리포트 페이지네이션 ── */
+    .br-pager {
+      display: flex; flex-wrap: wrap; gap: 3px;
+      justify-content: center; padding: 14px 0 4px;
+      border-top: 1px solid var(--border); margin-top: 4px;
+    }
+    .br-pg-btn {
+      min-width: 30px; padding: 4px 7px;
+      border: 1px solid var(--border); border-radius: 4px;
+      background: transparent; color: var(--text);
+      cursor: pointer; font-size: .78rem; line-height: 1.4;
+      transition: background .15s;
+    }
+    .br-pg-btn:hover:not(:disabled) { background: rgba(255,255,255,.08); }
+    .br-pg-btn.br-pg-active {
+      background: var(--blue); color: #fff;
+      border-color: var(--blue); font-weight: 700;
+    }
+    .br-pg-btn:disabled { opacity: .35; cursor: default; }
+
     /* ── 위대한 기업 찾기 ── */
     .gc-tabs { display:flex; gap:6px; padding:8px 12px; border-bottom:1px solid var(--border); }
     .gc-tab {
@@ -2208,43 +2228,49 @@
   }
 
   /* ── 증권사 리포트 하위 탭 ── */
-  const _brCache = {};   // type → data[]
+  const _brCache = {};          // "type|page" → {items, total_pages}
+  let   _brActiveType = '종목분석';
 
   function renderBrokerReports() {
-    // 탭을 처음 열 때 기본 유형 자동 로드
-    loadBrokerType('종목분석');
+    loadBrokerType(_brActiveType, 1);
   }
 
-  async function loadBrokerType(type) {
+  async function loadBrokerType(type, page = 1) {
+    _brActiveType = type;
+
     // 하위 버튼 활성화 갱신
     document.querySelectorAll('.br-subbtn').forEach(b =>
       b.classList.toggle('br-sub-active', b.dataset.btype === type));
 
-    const content = document.getElementById('br-content');
+    const content  = document.getElementById('br-content');
+    const cacheKey = `${type}|${page}`;
 
     // 캐시 히트
-    if (_brCache[type]) {
-      _renderBrList(content, _brCache[type]);
+    if (_brCache[cacheKey]) {
+      _renderBrList(content, _brCache[cacheKey].items,
+                    _brCache[cacheKey].total_pages, page, type);
+      content.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return;
     }
 
     content.innerHTML = `<div class="br-loading">불러오는 중…</div>`;
     try {
-      const resp = await fetch(`/api/broker-reports?type=${encodeURIComponent(type)}`);
+      const resp = await fetch(
+        `/api/broker-reports?type=${encodeURIComponent(type)}&page=${page}`);
       const data = await resp.json();
-      _brCache[type] = data;
-      _renderBrList(content, data);
+      _brCache[cacheKey] = data;
+      _renderBrList(content, data.items, data.total_pages, page, type);
     } catch(e) {
       content.innerHTML = `<div class="br-empty">오류가 발생했습니다.</div>`;
     }
   }
 
-  function _renderBrList(container, data) {
-    if (!data.length) {
+  function _renderBrList(container, items, total_pages, current_page, type) {
+    if (!items || !items.length) {
       container.innerHTML = `<div class="br-empty">리포트를 불러오지 못했습니다.</div>`;
       return;
     }
-    container.innerHTML = data.map(r => {
+    const listHtml = items.map(r => {
       const read = _visitedNews.has(r.link) ? ' bri-read' : '';
       return `<div class="br-item${read}">
         <div class="br-body">
@@ -2256,6 +2282,28 @@
         <span class="br-date">${r.date.slice(2).replace(/\./g,'/')}</span>
       </div>`;
     }).join("");
+    container.innerHTML = listHtml + _renderBrPager(total_pages, current_page, type);
+  }
+
+  function _renderBrPager(total_pages, current_page, type) {
+    if (!total_pages || total_pages <= 1) return '';
+    const G      = 10;
+    const grp    = Math.ceil(current_page / G);
+    const gStart = (grp - 1) * G + 1;
+    const gEnd   = Math.min(gStart + G - 1, total_pages);
+    const safeT  = type.replace(/'/g, "\\'");
+
+    let html = '<div class="br-pager">';
+    if (gStart > 1)
+      html += `<button class="br-pg-btn" onclick="loadBrokerType('${safeT}',${gStart-1})">이전</button>`;
+    for (let p = gStart; p <= gEnd; p++) {
+      const act = p === current_page ? ' br-pg-active' : '';
+      html += `<button class="br-pg-btn${act}" onclick="loadBrokerType('${safeT}',${p})">${p}</button>`;
+    }
+    if (gEnd < total_pages)
+      html += `<button class="br-pg-btn" onclick="loadBrokerType('${safeT}',${gEnd+1})">다음</button>`;
+    html += '</div>';
+    return html;
   }
 
   function _markReadBr(url, el) {

@@ -652,9 +652,9 @@ def _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids):
     except Exception:
         return [], page_num
 
-    # 총 페이지 수: 페이지네이션 링크에서 최대값
-    pg_re      = re.compile(rf'{re.escape(list_page)}\.naver[^"]*[?&]page=(\d+)')
-    pg_nums    = [int(m.group(1)) for m in pg_re.finditer(html)]
+    # 총 페이지 수: 페이지네이션 링크에서 최대값 (HTML은 &amp; 이스케이프)
+    pg_re       = re.compile(rf'{re.escape(list_page)}\.naver[^"]*page=(\d+)')
+    pg_nums     = [int(m.group(1)) for m in pg_re.finditer(html)]
     total_pages = max(pg_nums) if pg_nums else page_num
 
     link_re = re.compile(

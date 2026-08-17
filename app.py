@@ -637,11 +637,13 @@ _REPORT_CFG_MAP = {cfg[0]: cfg for cfg in _REPORT_CONFIGS}
 _broker_cache   = {}   # label → {"data": [...], "fetched_at": 0}
 BROKER_TTL      = 1800  # 30분
 
-def _fetch_report_type(label, list_page, read_prefix, n=20):
+def _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids):
+    """단일 페이지 파싱 — seen_nids 로 중복 제거"""
     _date_re = re.compile(r'(\d{2}\.\d{2}\.\d{2})')
-    url = f"https://finance.naver.com/research/{list_page}.naver"
+    params = {"page": page_num} if page_num > 1 else {}
+    url    = f"https://finance.naver.com/research/{list_page}.naver"
     try:
-        resp = requests.get(url, headers={
+        resp = requests.get(url, params=params, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "Referer":    "https://finance.naver.com/research/",
         }, timeout=8)
@@ -651,16 +653,18 @@ def _fetch_report_type(label, list_page, read_prefix, n=20):
         return []
 
     link_re = re.compile(
-        rf'href="({re.escape(read_prefix)}\.naver\?nid=\d+[^"]*?)"[^>]*>(.*?)</a>',
+        rf'href="({re.escape(read_prefix)}\.naver\?nid=(\d+)[^"]*?)"[^>]*>(.*?)</a>',
         re.DOTALL
     )
-    results = []
-    count   = 0
+    items = []
     for m in link_re.finditer(html):
-        if count >= n:
-            break
+        nid   = m.group(2)
+        if nid in seen_nids:
+            continue
+        seen_nids.add(nid)
+
         path  = m.group(1)
-        title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+        title = re.sub(r"<[^>]+>", "", m.group(3)).strip()
         title = clean(title)
         if not title or len(title) < 5:
             continue
@@ -677,7 +681,6 @@ def _fetch_report_type(label, list_page, read_prefix, n=20):
             if 2 <= len(td_txt) <= 15 and re.search(r'[가-힣]', td_txt):
                 firm = td_txt
 
-        # 종목분석 리포트: 링크 앞쪽 TR에서 첫 번째 TD = 종목명
         stock_name = ""
         if label == "종목분석":
             tr_start = html.rfind("<tr", 0, m.start())
@@ -688,7 +691,7 @@ def _fetch_report_type(label, list_page, read_prefix, n=20):
                     stock_name = re.sub(r"<[^>]+>", "", td_m.group(1)).strip()
                     stock_name = clean(stock_name)
 
-        results.append({
+        items.append({
             "title":      title,
             "firm":       firm,
             "stock_name": stock_name,
@@ -696,7 +699,17 @@ def _fetch_report_type(label, list_page, read_prefix, n=20):
             "link":       f"https://finance.naver.com/research/{path}",
             "type":       label,
         })
-        count += 1
+    return items
+
+
+def _fetch_report_type(label, list_page, read_prefix, max_pages=5):
+    seen_nids = set()
+    results   = []
+    for page_num in range(1, max_pages + 1):
+        items = _fetch_report_page(label, list_page, read_prefix, page_num, seen_nids)
+        if not items:
+            break
+        results.extend(items)
     return results
 
 

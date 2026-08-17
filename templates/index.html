@@ -2999,7 +2999,7 @@
         </div>` : "";
 
       return `
-        <div class="card">
+        <div class="card" data-ticker="${ticker}">
           <div class="card-hd">
             <div class="card-hd-top">
               <span class="stock-name">${s.name}</span>
@@ -3128,7 +3128,45 @@
     document.getElementById("f-ticker").value = "";
     hidePicker();
     showMsg("add-msg", `${name} 추가됨`, "ok");
-    loadAll(true, true);
+
+    // 즉시 카드를 DOM에 삽입 (로딩 없이 바로 표시)
+    const gridId  = market === "KR" ? "kr-grid" : "us-grid";
+    const grid    = document.getElementById(gridId);
+    const safeN   = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const tid     = ticker.replace(/[^A-Z0-9]/g, "");
+    const naverLn = market === "KR" ? `
+      <div class="naver-links">
+        <a class="nv-btn" href="https://finance.naver.com/item/main.naver?code=${ticker}" target="_blank" rel="noopener">종목분석</a>
+        <a class="nv-btn" href="https://finance.naver.com/item/fchart.naver?code=${ticker}" target="_blank" rel="noopener">차트</a>
+        <a class="nv-btn" href="https://finance.naver.com/item/news.naver?code=${ticker}" target="_blank" rel="noopener">공시·뉴스</a>
+        <a class="nv-btn" href="https://finance.naver.com/item/coinfo.naver?code=${ticker}" target="_blank" rel="noopener">재무제표</a>
+        <a class="nv-btn" href="https://finance.naver.com/item/analyst.naver?code=${ticker}" target="_blank" rel="noopener">투자의견</a>
+      </div>` : "";
+    const newsHtml = market === "KR"
+      ? `<ul class="news-list" id="snews-${tid}"><li class="no-news">뉴스 로딩 중…</li></ul>
+         <div class="news-pg" id="snewspg-${tid}">${_initPgBar(safeN, tid)}</div>`
+      : `<ul class="news-list"><li class="no-news">뉴스 로딩 중…</li></ul>`;
+    const cardEl = document.createElement("div");
+    cardEl.className = "card";
+    cardEl.setAttribute("data-ticker", ticker);
+    cardEl.innerHTML = `
+      <div class="card-hd">
+        <div class="card-hd-top">
+          <span class="stock-name">${name}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="code-tag">${ticker}</span>
+            <button class="detail-btn" onclick="openDetail('${ticker}','${safeN}','${market}')">상세보기</button>
+            <button class="del-btn" onclick="removeStock('${ticker}','${safeN}')" title="삭제">×</button>
+          </div>
+        </div>
+        <div class="price-row" id="px-${name}"><span class="price-loading">시세 조회 중…</span></div>
+      </div>
+      ${newsHtml}${naverLn}`;
+    grid.appendChild(cardEl);
+
+    // 백그라운드에서 시세 갱신 + 해당 종목 뉴스 로드
+    loadPrices();
+    if (market === "KR") loadStockNews(name, tid, 1);
   }
 
   function showTickerPicker(results, market) {
@@ -3163,17 +3201,26 @@
   /* ── 관심종목 삭제 ── */
   async function removeStock(ticker, name) {
     if (!confirm(`'${name}' 을(를) 관심종목에서 삭제할까요?`)) return;
+    // 즉시 카드 제거 (API 응답 기다리지 않음)
+    const card = document.querySelector(`.card[data-ticker="${ticker}"]`);
+    if (card) card.remove();
+    showMsg("add-msg", `${name} 삭제됨`, "ok");
     try {
       const r = await fetch("/api/watchlist/remove", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({ticker}),
       });
-      const d = await r.json();
-      if (!r.ok) { alert(d.error || "삭제 실패"); return; }
-      showMsg("add-msg", `${name} 삭제됨`, "ok");
-      loadAll(true);
-    } catch { alert("서버 오류"); }
+      if (!r.ok) {
+        // 삭제 실패 시 카드 복원을 위해 페이지 새로고침
+        const d = await r.json();
+        alert(d.error || "삭제 실패");
+        loadAll();
+      }
+    } catch {
+      alert("서버 오류");
+      loadAll();
+    }
   }
 
   /* ── 메시지 표시 (3초 후 자동 소거) ── */
@@ -3193,6 +3240,43 @@
       if (e.key === "Enter") addStock();
     })
   );
+
+  /* ── 종목명 자동완성 (타이핑하면서 드롭다운) ── */
+  let _acTimer = null;
+  document.getElementById("f-name").addEventListener("input", function() {
+    const val = this.value.trim();
+    clearTimeout(_acTimer);
+    if (!val) { hidePicker(); return; }
+    _acTimer = setTimeout(async () => {
+      const market = document.getElementById("f-market").value;
+      try {
+        const r = await fetch(`/api/ticker-lookup?name=${encodeURIComponent(val)}&market=${market}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.results && d.results.length) showTickerPicker(d.results, market);
+        else hidePicker();
+      } catch {}
+    }, 300);
+  });
+  /* 시장 변경 시 자동완성 갱신 */
+  document.getElementById("f-market").addEventListener("change", function() {
+    const val = document.getElementById("f-name").value.trim();
+    if (!val) return;
+    clearTimeout(_acTimer);
+    _acTimer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/ticker-lookup?name=${encodeURIComponent(val)}&market=${this.value}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.results && d.results.length) showTickerPicker(d.results, this.value);
+        else hidePicker();
+      } catch {}
+    }, 200);
+  });
+  /* 입력 바깥 클릭 시 드롭다운 닫기 */
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#ticker-sug") && !e.target.closest(".add-bar")) hidePicker();
+  });
 
   /* ── 종목 상세 드로어 ── */
   const _BADGE_CLS = {

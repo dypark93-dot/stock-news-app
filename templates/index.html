@@ -543,6 +543,12 @@
       line-height: 1.45; display: block;
     }
     .br-body a:hover { color: var(--link-h); text-decoration: underline; }
+    .br-stock {
+      display: inline-block; font-size: .78rem; font-weight: 700;
+      color: var(--amber); background: rgba(245,158,11,.1);
+      border: 1px solid rgba(245,158,11,.3); border-radius: 4px;
+      padding: 1px 7px; margin-bottom: 4px; line-height: 1.5;
+    }
     .br-meta { font-size: .63rem; color: var(--muted); margin-top: .12rem; }
     .br-date { flex-shrink: 0; font-size: .63rem; color: var(--muted); white-space: nowrap; padding-top: .1rem; }
     .br-loading, .br-empty { text-align: center; padding: 2rem; color: var(--muted); font-size: .85rem; }
@@ -2240,12 +2246,12 @@
     }
     container.innerHTML = data.map(r => {
       const read = _visitedNews.has(r.link) ? ' bri-read' : '';
-      const meta = [r.stock_name, r.firm].filter(Boolean).join(' · ');
       return `<div class="br-item${read}">
         <div class="br-body">
+          ${r.stock_name ? `<div><span class="br-stock">${r.stock_name}</span></div>` : ''}
           <a href="${r.link}" target="_blank" rel="noopener"
              onclick="_markReadBr(this.href,this)">${r.title}</a>
-          ${meta ? `<div class="br-meta">${meta}</div>` : ''}
+          ${r.firm ? `<div class="br-meta">${r.firm}</div>` : ''}
         </div>
         <span class="br-date">${r.date.slice(2).replace(/\./g,'/')}</span>
       </div>`;

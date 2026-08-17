@@ -677,12 +677,24 @@ def _fetch_report_type(label, list_page, read_prefix, n=20):
             if 2 <= len(td_txt) <= 15 and re.search(r'[가-힣]', td_txt):
                 firm = td_txt
 
+        # 종목분석 리포트: 링크 앞쪽 TR에서 첫 번째 TD = 종목명
+        stock_name = ""
+        if label == "종목분석":
+            tr_start = html.rfind("<tr", 0, m.start())
+            if tr_start != -1:
+                row_before = html[tr_start: m.start()]
+                td_m = re.search(r'<td[^>]*>\s*(.*?)\s*</td>', row_before, re.DOTALL)
+                if td_m:
+                    stock_name = re.sub(r"<[^>]+>", "", td_m.group(1)).strip()
+                    stock_name = clean(stock_name)
+
         results.append({
-            "title": title,
-            "firm":  firm,
-            "date":  "20" + dm.group(1),
-            "link":  f"https://finance.naver.com/research/{path}",
-            "type":  label,
+            "title":      title,
+            "firm":       firm,
+            "stock_name": stock_name,
+            "date":       "20" + dm.group(1),
+            "link":       f"https://finance.naver.com/research/{path}",
+            "type":       label,
         })
         count += 1
     return results

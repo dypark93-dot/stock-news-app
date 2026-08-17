@@ -2240,11 +2240,12 @@
     }
     container.innerHTML = data.map(r => {
       const read = _visitedNews.has(r.link) ? ' bri-read' : '';
+      const meta = [r.stock_name, r.firm].filter(Boolean).join(' · ');
       return `<div class="br-item${read}">
         <div class="br-body">
           <a href="${r.link}" target="_blank" rel="noopener"
              onclick="_markReadBr(this.href,this)">${r.title}</a>
-          ${r.firm ? `<div class="br-meta">${r.firm}</div>` : ''}
+          ${meta ? `<div class="br-meta">${meta}</div>` : ''}
         </div>
         <span class="br-date">${r.date.slice(2).replace(/\./g,'/')}</span>
       </div>`;

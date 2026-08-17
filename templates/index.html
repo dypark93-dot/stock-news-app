@@ -1300,11 +1300,11 @@
   let _feedRendered  = false;
 
   /* ── 전체 로드 ── */
-  async function loadAll(force = false) {
+  async function loadAll(force = false, silent = false) {
     const btn = document.getElementById("refresh-btn");
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span>';
-    showLoading();
+    if (!silent) showLoading();
     try {
       const qs = force ? "?force=1&_=" + Date.now() : "";
       const [nRes, pRes, mRes] = await Promise.all([
@@ -1318,8 +1318,10 @@
       const market = mRes.ok ? await mRes.json() : {items:[]};
       renderAll(news, prices, market);
     } catch {
-      document.getElementById("loading").innerHTML =
-        '<p class="page-err">⚠ 데이터를 불러오지 못했습니다.<br>서버가 실행 중인지 확인해주세요.</p>';
+      if (!silent) {
+        document.getElementById("loading").innerHTML =
+          '<p class="page-err">⚠ 데이터를 불러오지 못했습니다.<br>서버가 실행 중인지 확인해주세요.</p>';
+      }
     } finally {
       btn.disabled = false;
       btn.textContent = "새로고침";
@@ -3126,7 +3128,7 @@
     document.getElementById("f-ticker").value = "";
     hidePicker();
     showMsg("add-msg", `${name} 추가됨`, "ok");
-    loadAll(true);
+    loadAll(true, true);
   }
 
   function showTickerPicker(results, market) {

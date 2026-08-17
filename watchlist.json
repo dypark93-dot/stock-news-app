@@ -83,5 +83,20 @@
     "name": "SK hynix Inc.",
     "ticker": "SKHY",
     "market": "US"
+  },
+  {
+    "name": "한국콜마",
+    "ticker": "161890",
+    "market": "KR"
+  },
+  {
+    "name": "코나아이",
+    "ticker": "052400",
+    "market": "KR"
+  },
+  {
+    "name": "sk텔레콤",
+    "ticker": "017670",
+    "market": "KR"
   }
 ]

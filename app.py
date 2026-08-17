@@ -317,6 +317,8 @@ def get_news(force=False):
     stale  = _news_cache["data"] is None or now - _news_cache["fetched_at"] >= NEWS_TTL
     man_ok = force and now - _news_cache["fetched_at"] >= MIN_FORCE
     if stale or man_ok:
+        global KR_STOCKS, US_STOCKS
+        KR_STOCKS, US_STOCKS = load_watchlist()   # 파일 외부 편집 반영
         _news_cache["data"]       = build_news()
         _news_cache["fetched_at"] = now
     return _news_cache["data"]
@@ -343,12 +345,12 @@ def get_krx_stocks():
     return _krx_cache["data"]
 
 def search_kr_ticker(name):
-    """KRX 캐시에서 종목명 부분 일치 검색"""
+    """KRX 캐시에서 종목명 부분 일치 검색 (대소문자 무시)"""
     stocks  = get_krx_stocks()
-    keyword = name.strip()
+    keyword = name.strip().lower()
     results = []
     for s in stocks:
-        if keyword in s.get("codeName", ""):
+        if keyword in s.get("codeName", "").lower():
             results.append({
                 "ticker": s["short_code"],
                 "name":   s["codeName"],

@@ -402,6 +402,46 @@
       color: var(--amber);
     }
 
+    /* ── 맞춤 뉴스 직접검색 ── */
+    .pers-search-area {
+      padding: 10px 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 2px;
+    }
+    .pers-search-row {
+      display: flex; gap: 6px; margin-bottom: 8px;
+    }
+    .pers-search-input {
+      flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--card); color: var(--text); font-size: .82rem;
+    }
+    .pers-search-input:focus { outline: none; border-color: var(--blue); }
+    .pers-search-btn {
+      padding: 6px 12px; background: var(--blue-d); color: #fff; border: none;
+      border-radius: 6px; cursor: pointer; font-size: .82rem; white-space: nowrap;
+    }
+    .pers-search-btn:hover { background: var(--blue); }
+    .pers-clear-btn {
+      padding: 6px 9px; background: transparent; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: .82rem;
+    }
+    .pers-clear-btn:hover { color: var(--text); }
+    .pers-presets-row {
+      display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding-bottom: 10px;
+    }
+    .pers-preset-label { font-size: .68rem; color: var(--muted); margin-right: 2px; }
+    .pers-preset-chip {
+      font-size: .72rem; padding: 2px 9px; cursor: pointer;
+      border: 1px solid rgba(59,130,246,.4); border-radius: 10px;
+      background: rgba(59,130,246,.07); color: var(--link);
+      transition: background .15s;
+    }
+    .pers-preset-chip:hover { background: rgba(59,130,246,.2); }
+    .pers-preset-chip.ppc-active { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .pers-manual-tag {
+      font-size: .72rem; padding: 2px 8px; background: rgba(59,130,246,.15);
+      border: 1px solid rgba(59,130,246,.5); border-radius: 10px; color: var(--link);
+      margin-bottom: 4px; display: inline-block;
+    }
+
     /* ── 맞춤 뉴스 ── */
     .pers-kw-bar {
       display: flex; flex-wrap: wrap; gap: 6px;
@@ -1188,6 +1228,7 @@
             <span class="market-kw-tag">국내 증시</span>
             <span class="market-kw-tag">미국 증시</span>
             <span class="market-kw-tag">반도체</span>
+            <span class="market-kw-tag">기술 트렌드</span>
             <span class="market-kw-tag">매크로</span>
             <span class="market-kw-tag">지정학</span>
           </div>
@@ -2704,16 +2745,80 @@
   const _PERS_PER_PAGE = 30;
   let _benefitResult  = null;
   let _benefitLoading = false;
+  let _persManualKw   = null;   // 직접 검색 키워드
+
+  const _TECH_PRESETS = [
+    "나노공정", "AI 반도체", "파운드리 기술", "자율주행", "차세대 배터리",
+    "양자컴퓨팅", "로봇 기술", "우주 산업",
+  ];
+
+  function _persSearchBarHtml() {
+    const chips = _TECH_PRESETS.map(p => {
+      const act = p === _persManualKw ? ' ppc-active' : '';
+      return `<button class="pers-preset-chip${act}" onclick="searchKwDirect('${p}')">${p}</button>`;
+    }).join('');
+    return `<div class="pers-search-area">
+      <div class="pers-search-row">
+        <input class="pers-search-input" id="pers-kw-input" type="text"
+          placeholder="기술 트렌드 키워드 검색 (예: 나노공정, AI 반도체)"
+          value="${_persManualKw || ''}"
+          onkeydown="if(event.key==='Enter') searchKwDirect()"/>
+        <button class="pers-search-btn" onclick="searchKwDirect()">검색</button>
+        ${_persManualKw ? `<button class="pers-clear-btn" onclick="clearManualSearch()" title="검색 해제">✕</button>` : ''}
+      </div>
+      <div class="pers-presets-row">
+        <span class="pers-preset-label">미래 기술</span>${chips}
+      </div>
+    </div>`;
+  }
+
+  async function searchKwDirect(preset) {
+    const input = document.getElementById('pers-kw-input');
+    const kw = preset || (input ? input.value.trim() : '');
+    if (!kw) return;
+    _persManualKw = kw;
+    const el = document.getElementById("market-personalized");
+    if (!el) return;
+    el.innerHTML = _persSearchBarHtml() +
+      `<div class="pers-loading">「${kw}」 관련 뉴스 검색 중…</div>`;
+    try {
+      const resp = await fetch(`/api/personalized?kw=${encodeURIComponent(kw)}`);
+      const data = await resp.json();
+      _persAllItems  = data.items || [];
+      _persPage      = 1;
+      _benefitResult = null;
+      _renderPersPage();
+    } catch(e) {
+      el.innerHTML = _persSearchBarHtml() +
+        `<div class="pers-empty">검색 실패. 잠시 후 다시 시도해주세요.</div>`;
+    }
+  }
+
+  function clearManualSearch() {
+    _persManualKw  = null;
+    _persAllItems  = [];
+    _persPage      = 1;
+    _benefitResult = null;
+    renderPersonalized();
+  }
 
   async function renderPersonalized() {
     const el = document.getElementById("market-personalized");
     if (!el) return;
 
+    const searchBar = _persSearchBarHtml();
+
+    // 직접 검색 모드
+    if (_persManualKw) {
+      await searchKwDirect(_persManualKw);
+      return;
+    }
+
     const topKws = _getTopKws(5);
     if (topKws.length === 0) {
-      el.innerHTML = `<div class="pers-empty">
+      el.innerHTML = searchBar + `<div class="pers-empty">
         아직 읽은 기사가 없습니다.<br>
-        시장 이슈 탭에서 관심 있는 기사를 클릭하면<br>
+        위 프리셋으로 바로 검색하거나, 시장 이슈 탭의 기사를 클릭하면<br>
         그 방향으로 맞춤 뉴스를 찾아드립니다.
       </div>`;
       return;
@@ -2723,10 +2828,9 @@
       `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
     ).join('');
     const kwBar      = `<div class="pers-kw-bar">${kwChips}</div>`;
-    // 뉴스 로딩 전에도 규칙 기반 추천은 즉시 표시
     const ruleStocks  = _getRuleStocks(topKws);
     const ruleSection = _renderRuleStocksHtml(ruleStocks);
-    el.innerHTML = kwBar + ruleSection +
+    el.innerHTML = searchBar + kwBar + ruleSection +
       `<div class="pers-loading">관심 키워드로 뉴스 검색 중…</div>`;
 
     try {
@@ -2737,7 +2841,7 @@
       _benefitResult = null;
       _renderPersPage();
     } catch(e) {
-      el.innerHTML = kwBar + ruleSection +
+      el.innerHTML = searchBar + kwBar + ruleSection +
         `<div class="pers-empty">뉴스 로딩 실패. 잠시 후 다시 시도해주세요.</div>`;
     }
   }
@@ -2746,18 +2850,23 @@
     const el = document.getElementById("market-personalized");
     if (!el) return;
 
-    const topKws  = _getTopKws(5);
-    const kwChips = topKws.map(k =>
-      `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
-    ).join('');
-    const kwBar = `<div class="pers-kw-bar">${kwChips}</div>`;
+    const searchBar = _persSearchBarHtml();
 
-    // 규칙 기반 즉시 추천 — 뉴스 유무와 무관하게 항상 먼저 계산
-    const ruleStocks  = _getRuleStocks(topKws);
-    const ruleSection = _renderRuleStocksHtml(ruleStocks);
+    // 직접 검색 모드: kwBar/ruleSection 대신 검색 키워드 태그 표시
+    let kwBar = '', ruleSection = '';
+    if (_persManualKw) {
+      kwBar = `<div class="pers-kw-bar"><span class="pers-manual-tag">🔍 ${_persManualKw}</span></div>`;
+    } else {
+      const topKws  = _getTopKws(5);
+      const kwChips = topKws.map(k =>
+        `<span class="pers-kw-chip">${k} <em>${_clickedKws[k]||0}</em></span>`
+      ).join('');
+      kwBar       = `<div class="pers-kw-bar">${kwChips}</div>`;
+      ruleSection = _renderRuleStocksHtml(_getRuleStocks(topKws));
+    }
 
     if (!_persAllItems.length) {
-      el.innerHTML = kwBar + ruleSection + `<div class="pers-empty">검색 결과가 없습니다.</div>`;
+      el.innerHTML = searchBar + kwBar + ruleSection + `<div class="pers-empty">검색 결과가 없습니다.</div>`;
       return;
     }
 
@@ -2790,7 +2899,7 @@
       </div>`;
     }).join('');
 
-    el.innerHTML = kwBar + ruleSection + benefitBtn + benefitPanel + countHtml + pgHtml + items + pgHtml;
+    el.innerHTML = searchBar + kwBar + ruleSection + benefitBtn + benefitPanel + countHtml + pgHtml + items + pgHtml;
   }
 
   async function fetchBenefits() {

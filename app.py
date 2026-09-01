@@ -403,7 +403,7 @@ MARKET_CATEGORIES = [
     {"name": "국내 증시", "keywords": ["코스피", "코스닥", "서킷브레이커", "사이드카", "외국인 순매도"]},
     {"name": "미국 증시", "keywords": ["나스닥", "S&P500", "다우존스", "연준 금리"]},
     {"name": "반도체",   "keywords": ["반도체 수출", "HBM", "파운드리", "메모리 가격", "나노공정", "AI 반도체"]},
-    {"name": "기술 트렌드", "keywords": ["나노공정 개발", "자율주행 기술", "차세대 배터리", "양자컴퓨팅", "로봇 기술"]},
+    {"name": "기술 트렌드", "keywords": ["HBM4", "빅테크 자체칩", "AI 데이터센터", "파운드리 수주", "온디바이스 AI", "차세대 메모리", "AI 가속기", "커스텀 AI칩"]},
     {"name": "매크로",   "keywords": ["원달러 환율", "국제유가", "미국 국채금리", "한국은행 기준금리"]},
     {"name": "지정학",   "keywords": ["중동 정세", "호르무즈 해협", "미중 무역"]},
 ]
@@ -414,6 +414,12 @@ RSS_FEEDS = [
     "https://news.einfomax.co.kr/rss/allArticle.xml",  # 연합인포맥스   ( 50건)
     "https://www.newsis.com/RSS/economy.xml",          # 뉴시스 경제    (100건)
     "https://www.mk.co.kr/rss/30100041/",              # 매일경제 경제  ( 50건)
+]
+
+# 기술·반도체 전문 RSS (기술 트렌드 카테고리 전용)
+TECH_RSS_FEEDS = [
+    "https://www.etnews.com/rss/rss_all.xml",          # 전자신문 전체
+    "https://www.thelec.kr/rss/allArticle.xml",        # 디일렉
 ]
 _rss_cache    = {"data": None, "fetched_at": 0}
 _market_cache = {"data": None, "fetched_at": 0}
@@ -490,9 +496,88 @@ def _build_category(cat_name, keywords, rss_pool):
 
     return {"name": cat_name, "items": items}
 
+_tech_rss_cache = {"data": None, "fetched_at": 0}
+
+def get_tech_rss_items():
+    now = time.time()
+    if _tech_rss_cache["data"] is None or now - _tech_rss_cache["fetched_at"] >= NEWS_TTL:
+        items = []
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        for url in TECH_RSS_FEEDS:
+            try:
+                for e in feedparser.parse(url, agent=ua).entries[:200]:
+                    t = clean(e.get("title", ""))
+                    l = e.get("link", "")
+                    if t and l:
+                        items.append({
+                            "title":   t,
+                            "link":    l,
+                            "pubDate": e.get("published", ""),
+                            "source":  _domain_to_press(l),
+                        })
+            except Exception:
+                pass
+        _tech_rss_cache["data"]       = items
+        _tech_rss_cache["fetched_at"] = now
+    return _tech_rss_cache["data"]
+
+def _build_tech_category(cat_name, keywords, rss_pool):
+    """기술 트렌드 전용: Naver + Google News + 기술 RSS 3종 소스를 모두 수집"""
+    seen_links  = set()
+    seen_titles = []
+    items       = []
+
+    # 1. Naver 키워드 검색
+    naver_pool = []
+    for i, kw in enumerate(keywords):
+        if i > 0:
+            time.sleep(0.15)
+        try:
+            for art in naver_news(kw, n=50):
+                naver_pool.append({**art, "keyword": kw})
+        except Exception:
+            pass
+
+    # 2. Google News RSS (전문지 포함 다양한 소스)
+    google_pool = []
+    for i, kw in enumerate(keywords):
+        if i > 0:
+            time.sleep(0.1)
+        try:
+            for art in google_news_kr(kw, n=20):
+                google_pool.append({**art, "keyword": kw})
+        except Exception:
+            pass
+
+    # 3. 일반 RSS 풀 + 기술 전문 RSS 키워드 매칭
+    tech_rss = get_tech_rss_items()
+    rss_matched = []
+    for art in rss_pool + tech_rss:
+        for kw in keywords:
+            if kw in art["title"]:
+                rss_matched.append({**art, "keyword": kw})
+                break
+
+    # 4. 합산 후 중복 제거
+    for art in naver_pool + google_pool + rss_matched:
+        if art["link"] in seen_links:
+            continue
+        if _is_dup(art["title"], seen_titles):
+            continue
+        seen_links.add(art["link"])
+        seen_titles.append(art["title"])
+        items.append({**art, "cat": cat_name})
+
+    return {"name": cat_name, "items": items}
+
 def build_market_news():
-    rss_pool   = get_rss_items()
-    categories = [_build_category(c["name"], c["keywords"], rss_pool) for c in MARKET_CATEGORIES]
+    rss_pool = get_rss_items()
+    categories = []
+    for c in MARKET_CATEGORIES:
+        if c["name"] == "기술 트렌드":
+            categories.append(_build_tech_category(c["name"], c["keywords"], rss_pool))
+        else:
+            categories.append(_build_category(c["name"], c["keywords"], rss_pool))
     return {"categories": categories, "fetched_at": int(time.time())}
 
 def get_market_news(force=False):

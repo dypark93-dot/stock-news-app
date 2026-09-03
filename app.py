@@ -424,25 +424,30 @@ TECH_RSS_FEEDS = [
 _rss_cache    = {"data": None, "fetched_at": 0}
 _market_cache = {"data": None, "fetched_at": 0}
 
+def _fetch_rss_url(url):
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    try:
+        result = []
+        for e in feedparser.parse(url, agent=ua).entries[:200]:
+            t = clean(e.get("title", ""))
+            l = e.get("link", "")
+            if t and l:
+                result.append({
+                    "title":   t,
+                    "link":    l,
+                    "pubDate": e.get("published", ""),
+                    "source":  _domain_to_press(l),
+                })
+        return result
+    except Exception:
+        return []
+
 def get_rss_items():
     now = time.time()
     if _rss_cache["data"] is None or now - _rss_cache["fetched_at"] >= NEWS_TTL:
-        items = []
-        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        for url in RSS_FEEDS:
-            try:
-                for e in feedparser.parse(url, agent=ua).entries[:200]:
-                    t = clean(e.get("title", ""))
-                    l = e.get("link", "")
-                    if t and l:
-                        items.append({
-                            "title":   t,
-                            "link":    l,
-                            "pubDate": e.get("published", ""),
-                            "source":  _domain_to_press(l),
-                        })
-            except Exception:
-                pass
+        with ThreadPoolExecutor(max_workers=len(RSS_FEEDS)) as ex:
+            batches = list(ex.map(_fetch_rss_url, RSS_FEEDS))
+        items = [art for batch in batches for art in batch]
         _rss_cache["data"]       = items
         _rss_cache["fetched_at"] = now
     return _rss_cache["data"]
@@ -501,22 +506,9 @@ _tech_rss_cache = {"data": None, "fetched_at": 0}
 def get_tech_rss_items():
     now = time.time()
     if _tech_rss_cache["data"] is None or now - _tech_rss_cache["fetched_at"] >= NEWS_TTL:
-        items = []
-        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        for url in TECH_RSS_FEEDS:
-            try:
-                for e in feedparser.parse(url, agent=ua).entries[:200]:
-                    t = clean(e.get("title", ""))
-                    l = e.get("link", "")
-                    if t and l:
-                        items.append({
-                            "title":   t,
-                            "link":    l,
-                            "pubDate": e.get("published", ""),
-                            "source":  _domain_to_press(l),
-                        })
-            except Exception:
-                pass
+        with ThreadPoolExecutor(max_workers=len(TECH_RSS_FEEDS)) as ex:
+            batches = list(ex.map(_fetch_rss_url, TECH_RSS_FEEDS))
+        items = [art for batch in batches for art in batch]
         _tech_rss_cache["data"]       = items
         _tech_rss_cache["fetched_at"] = now
     return _tech_rss_cache["data"]
@@ -560,9 +552,12 @@ def build_market_news():
     rss_pool = get_rss_items()
 
     def _build(c):
-        if c["name"] == "기술 트렌드":
-            return _build_tech_category(c["name"], c["keywords"], rss_pool)
-        return _build_category(c["name"], c["keywords"], rss_pool)
+        try:
+            if c["name"] == "기술 트렌드":
+                return _build_tech_category(c["name"], c["keywords"], rss_pool)
+            return _build_category(c["name"], c["keywords"], rss_pool)
+        except Exception:
+            return {"name": c["name"], "items": []}
 
     with ThreadPoolExecutor(max_workers=len(MARKET_CATEGORIES)) as ex:
         categories = list(ex.map(_build, MARKET_CATEGORIES))

@@ -522,34 +522,22 @@ def get_tech_rss_items():
     return _tech_rss_cache["data"]
 
 def _build_tech_category(cat_name, keywords, rss_pool):
-    """기술 트렌드 전용: Naver + Google News + 기술 RSS 3종 소스를 모두 수집"""
-    seen_links  = set()
-    seen_titles = []
-    items       = []
+    """기술 트렌드 전용: Naver + Google News + 기술 RSS — 키워드 병렬 수집"""
+    def _fetch_naver(kw):
+        try: return [{"keyword": kw, **a} for a in naver_news(kw, n=50)]
+        except Exception: return []
 
-    # 1. Naver 키워드 검색
-    naver_pool = []
-    for i, kw in enumerate(keywords):
-        if i > 0:
-            time.sleep(0.15)
-        try:
-            for art in naver_news(kw, n=50):
-                naver_pool.append({**art, "keyword": kw})
-        except Exception:
-            pass
+    def _fetch_google(kw):
+        try: return [{"keyword": kw, **a} for a in google_news_kr(kw, n=20)]
+        except Exception: return []
 
-    # 2. Google News RSS (전문지 포함 다양한 소스)
-    google_pool = []
-    for i, kw in enumerate(keywords):
-        if i > 0:
-            time.sleep(0.1)
-        try:
-            for art in google_news_kr(kw, n=20):
-                google_pool.append({**art, "keyword": kw})
-        except Exception:
-            pass
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        naver_batches  = list(ex.map(_fetch_naver, keywords))
+        google_batches = list(ex.map(_fetch_google, keywords))
 
-    # 3. 일반 RSS 풀 + 기술 전문 RSS 키워드 매칭
+    naver_pool  = [art for batch in naver_batches  for art in batch]
+    google_pool = [art for batch in google_batches for art in batch]
+
     tech_rss = get_tech_rss_items()
     rss_matched = []
     for art in rss_pool + tech_rss:
@@ -558,12 +546,10 @@ def _build_tech_category(cat_name, keywords, rss_pool):
                 rss_matched.append({**art, "keyword": kw})
                 break
 
-    # 4. 합산 후 중복 제거
+    seen_links, seen_titles, items = set(), [], []
     for art in naver_pool + google_pool + rss_matched:
-        if art["link"] in seen_links:
-            continue
-        if _is_dup(art["title"], seen_titles):
-            continue
+        if art["link"] in seen_links: continue
+        if _is_dup(art["title"], seen_titles): continue
         seen_links.add(art["link"])
         seen_titles.append(art["title"])
         items.append({**art, "cat": cat_name})
@@ -572,12 +558,15 @@ def _build_tech_category(cat_name, keywords, rss_pool):
 
 def build_market_news():
     rss_pool = get_rss_items()
-    categories = []
-    for c in MARKET_CATEGORIES:
+
+    def _build(c):
         if c["name"] == "기술 트렌드":
-            categories.append(_build_tech_category(c["name"], c["keywords"], rss_pool))
-        else:
-            categories.append(_build_category(c["name"], c["keywords"], rss_pool))
+            return _build_tech_category(c["name"], c["keywords"], rss_pool)
+        return _build_category(c["name"], c["keywords"], rss_pool)
+
+    with ThreadPoolExecutor(max_workers=len(MARKET_CATEGORIES)) as ex:
+        categories = list(ex.map(_build, MARKET_CATEGORIES))
+
     return {"categories": categories, "fetched_at": int(time.time())}
 
 def get_market_news(force=False):

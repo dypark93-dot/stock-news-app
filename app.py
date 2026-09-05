@@ -564,13 +564,37 @@ def build_market_news():
 
     return {"categories": categories, "fetched_at": int(time.time())}
 
+_market_refreshing = False
+_market_lock       = threading.Lock()
+
+def _refresh_market_bg():
+    global _market_refreshing
+    try:
+        data = build_market_news()
+        _market_cache["data"]       = data
+        _market_cache["fetched_at"] = time.time()
+    except Exception:
+        pass
+    finally:
+        _market_refreshing = False
+
 def get_market_news(force=False):
+    global _market_refreshing
     now    = time.time()
     stale  = _market_cache["data"] is None or now - _market_cache["fetched_at"] >= NEWS_TTL
     man_ok = force and now - _market_cache["fetched_at"] >= MIN_FORCE
-    if stale or man_ok:
-        _market_cache["data"]       = build_market_news()
-        _market_cache["fetched_at"] = now
+
+    if _market_cache["data"] is None:
+        # 데이터가 전혀 없으면 동기 대기 (한 번만)
+        with _market_lock:
+            if _market_cache["data"] is None:
+                _refresh_market_bg()
+    elif stale or man_ok:
+        # 캐시 만료: 기존 데이터 즉시 반환 + 백그라운드 갱신
+        if not _market_refreshing:
+            _market_refreshing = True
+            threading.Thread(target=_refresh_market_bg, daemon=True).start()
+
     return _market_cache["data"]
 
 @app.route("/api/market-news")
@@ -1816,6 +1840,16 @@ def api_analyze_benefits():
         return jsonify({"error": "API 키가 올바르지 않습니다."}), 401
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── 시작 시 백그라운드 워밍업 (콜드 스타트 대비) ─────────────────
+def _warmup():
+    try:
+        get_market_news()
+    except Exception:
+        pass
+
+threading.Thread(target=_warmup, daemon=True).start()
 
 
 if __name__ == "__main__":

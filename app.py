@@ -419,30 +419,25 @@ RSS_FEEDS = [
 _rss_cache    = {"data": None, "fetched_at": 0}
 _market_cache = {"data": None, "fetched_at": 0}
 
-def _fetch_rss_url(url):
-    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    try:
-        result = []
-        for e in feedparser.parse(url, agent=ua).entries[:200]:
-            t = clean(e.get("title", ""))
-            l = e.get("link", "")
-            if t and l:
-                result.append({
-                    "title":   t,
-                    "link":    l,
-                    "pubDate": e.get("published", ""),
-                    "source":  _domain_to_press(l),
-                })
-        return result
-    except Exception:
-        return []
-
 def get_rss_items():
     now = time.time()
     if _rss_cache["data"] is None or now - _rss_cache["fetched_at"] >= NEWS_TTL:
-        with ThreadPoolExecutor(max_workers=len(RSS_FEEDS)) as ex:
-            batches = list(ex.map(_fetch_rss_url, RSS_FEEDS))
-        items = [art for batch in batches for art in batch]
+        items = []
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        for url in RSS_FEEDS:
+            try:
+                for e in feedparser.parse(url, agent=ua).entries[:200]:
+                    t = clean(e.get("title", ""))
+                    l = e.get("link", "")
+                    if t and l:
+                        items.append({
+                            "title":   t,
+                            "link":    l,
+                            "pubDate": e.get("published", ""),
+                            "source":  _domain_to_press(l),
+                        })
+            except Exception:
+                pass
         _rss_cache["data"]       = items
         _rss_cache["fetched_at"] = now
     return _rss_cache["data"]
@@ -501,37 +496,13 @@ def build_market_news():
     categories = [_build_category(c["name"], c["keywords"], rss_pool) for c in MARKET_CATEGORIES]
     return {"categories": categories, "fetched_at": int(time.time())}
 
-_market_refreshing = False
-_market_lock       = threading.Lock()
-
-def _refresh_market_bg():
-    global _market_refreshing
-    try:
-        data = build_market_news()
-        _market_cache["data"]       = data
-        _market_cache["fetched_at"] = time.time()
-    except Exception:
-        pass
-    finally:
-        _market_refreshing = False
-
 def get_market_news(force=False):
-    global _market_refreshing
     now    = time.time()
     stale  = _market_cache["data"] is None or now - _market_cache["fetched_at"] >= NEWS_TTL
     man_ok = force and now - _market_cache["fetched_at"] >= MIN_FORCE
-
-    if _market_cache["data"] is None:
-        # 데이터가 전혀 없으면 동기 대기 (한 번만)
-        with _market_lock:
-            if _market_cache["data"] is None:
-                _refresh_market_bg()
-    elif stale or man_ok:
-        # 캐시 만료: 기존 데이터 즉시 반환 + 백그라운드 갱신
-        if not _market_refreshing:
-            _market_refreshing = True
-            threading.Thread(target=_refresh_market_bg, daemon=True).start()
-
+    if stale or man_ok:
+        _market_cache["data"]       = build_market_news()
+        _market_cache["fetched_at"] = now
     return _market_cache["data"]
 
 @app.route("/api/market-news")
@@ -1777,16 +1748,6 @@ def api_analyze_benefits():
         return jsonify({"error": "API 키가 올바르지 않습니다."}), 401
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ── 시작 시 백그라운드 워밍업 (콜드 스타트 대비) ─────────────────
-def _warmup():
-    try:
-        get_market_news()
-    except Exception:
-        pass
-
-threading.Thread(target=_warmup, daemon=True).start()
 
 
 if __name__ == "__main__":
